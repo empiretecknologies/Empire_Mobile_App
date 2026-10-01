@@ -1,0 +1,193 @@
+# STRICT PROJECT DEVELOPMENT RULES
+
+## 1. Project Technology Stack
+
+This project is built using the following technologies:
+
+* Framework: Flutter
+* Language: Dart
+* Platforms: Android and iOS
+* Backend: .NET Core Web API
+* API Communication: HTTP/REST API
+
+Do not introduce or migrate to another framework, architecture, library, or technology unless explicitly requested.
+
+---
+
+## 2. STRICT SCOPE RULE
+
+Only perform the exact task requested by the user.
+
+Do NOT:
+
+* Add extra functionality.
+* Add new features.
+* Modify unrelated functionality.
+* Refactor unrelated code.
+* Create unnecessary classes, files, methods, services, or helpers.
+* Add packages unless required.
+* Write unused or future-use code.
+
+---
+
+## 3. CODE DEVELOPMENT RULE
+
+* Write simple, clean, and to-the-point code.
+* Use the existing project structure and coding patterns.
+* Reuse existing classes, widgets, methods, and utilities where possible.
+* Do not create a new class when existing code can handle the requirement.
+* Do not over-engineer simple requirements.
+* Keep changes limited to the required files.
+
+---
+
+## 4. ANDROID AND IOS RULE
+
+* The application must work on both Android and iOS.
+* Prefer Flutter cross-platform solutions.
+* Any package added must support both Android and iOS.
+* Do not add platform-specific code unless explicitly required.
+* Do not modify native Android or iOS files unless required for the requested task.
+
+---
+
+## 5. .NET CORE API RULE
+
+All application data and business operations must use the provided .NET Core Web API.
+
+The API will handle:
+
+* Login
+* Authentication
+* Fetch
+* Insert
+* Update
+* Delete
+* Search
+* Other CRUD operations
+
+Do NOT:
+
+* Connect Flutter directly to SQL Server.
+* Write SQL queries in Flutter.
+* Duplicate backend business logic in Flutter.
+* Invent API endpoints or parameters.
+* Assume API response fields without checking the API.
+
+Always follow the actual API endpoint, request, response, and HTTP method provided by the backend.
+
+---
+
+## 6. API AUTHENTICATION RULE
+
+* Login must use the provided API login endpoint.
+* Store authentication tokens securely when required.
+* Send authentication information with protected API requests.
+* Handle unauthorized/expired sessions properly.
+* Never hard-code usernames, passwords, API keys, or tokens.
+
+---
+
+## 7. API CRUD RULE
+
+Use the API according to its defined HTTP methods:
+
+* GET → Fetch
+* POST → Insert
+* PUT/PATCH → Update
+* DELETE → Delete
+
+Do not implement database operations directly inside Flutter.
+
+---
+
+## 8. API MODEL RULE
+
+* Create Dart models only when required by the API.
+* Models must match the actual API request/response structure.
+* Do not create duplicate or unused models.
+* Do not add unnecessary fields or properties.
+
+---
+
+## 9. UI RULE
+
+* Follow the existing UI design and theme.
+* Keep UI simple and responsive.
+* UI must work on different Android and iOS screen sizes.
+* Do not change existing UI unnecessarily.
+* Reuse existing widgets and components where possible.
+
+---
+
+## 10. PACKAGE RULE
+
+* Do not add a package if Flutter/Dart already provides the required functionality.
+* Do not add unnecessary dependencies.
+* Before adding a package, check whether an existing project dependency can be reused.
+* Added packages must support Android and iOS.
+
+---
+
+## 11. ERROR HANDLING RULE
+
+Handle API states where required:
+
+* Loading
+* Success
+* Empty
+* Validation Error
+* Unauthorized
+* Server Error
+* Network Error
+
+Show user-friendly messages and do not display raw exceptions to users.
+
+---
+
+## 12. RESOURCE MANAGEMENT RULE
+
+Properly dispose:
+
+* TextEditingController
+* FocusNode
+* AnimationController
+* StreamSubscription
+* Other disposable resources
+
+Do not create resources unnecessarily.
+
+---
+
+## 13. TESTING RULE
+
+After making changes:
+
+* Check for compilation errors.
+* Check Dart analyzer errors.
+* Test the requested functionality.
+* Verify API integration.
+* Verify Android compatibility.
+* Verify iOS compatibility.
+* Make sure existing functionality is not broken.
+
+---
+
+## 14. FINAL STRICT RULE
+
+Before writing new code, check whether the requirement can be completed using existing code.
+
+**Use minimum code required to complete the task.**
+
+Do not create unnecessary:
+
+* Classes
+* Files
+* Methods
+* Models
+* Services
+* Helpers
+* Packages
+* Features
+
+**Keep the implementation simple, direct, and to the point.**
