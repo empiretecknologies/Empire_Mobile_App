@@ -14,6 +14,10 @@ class AppSession {
 
   bool get isLoggedIn => token != null && token!.isNotEmpty;
 
+  int? get ccode => company?.id;
+  int? get bcode => branch?.id;
+  int? get pid => period?.id;
+
   void clear() {
     token = null;
     username = null;

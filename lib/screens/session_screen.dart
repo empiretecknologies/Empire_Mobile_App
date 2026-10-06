@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/lookup_item.dart';
 import '../services/auth_service.dart';
+import '../services/dashboard_service.dart';
 import '../services/lookup_service.dart';
 import '../session/app_session.dart';
 import '../theme/app_theme.dart';
@@ -21,6 +22,7 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final _lookupService = LookupService();
   final _authService = AuthService();
+  final _dashboardService = DashboardService();
 
   List<LookupItem> _companies = [];
   List<LookupItem> _branches = [];
@@ -148,20 +150,26 @@ class _SessionScreenState extends State<SessionScreen> {
       return;
     }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
-      await _authService.saveContext(
-        company: '${_company!.id}',
-        branch: '${_branch!.id}',
-        period: '${_period!.id}',
-      );
-      if (!mounted) return;
       AppSession.instance
         ..company = _company
         ..branch = _branch
         ..period = _period;
+      await _authService.saveContext(
+        company: '${AppSession.instance.ccode}',
+        branch: '${AppSession.instance.bcode}',
+        period: '${AppSession.instance.pid}',
+      );
+      final summary = await _dashboardService.getDashboard();
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const DashboardScreen()),
+        MaterialPageRoute<void>(
+          builder: (_) => DashboardScreen(summary: summary),
+        ),
       );
     } on ApiException catch (error) {
       await _handleError(error);
@@ -185,96 +193,142 @@ class _SessionScreenState extends State<SessionScreen> {
           icon: const Icon(Icons.logout, color: AppColors.onForest),
         ),
         child: WhitePanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Stack(
             children: [
-              const PanelLogo(),
-              const SizedBox(height: 10),
-              const MqtBanner(),
-              const SizedBox(height: 14),
-              Text(
-                username.isEmpty ? 'Select session' : 'Welcome, $username',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 13,
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  _error!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFFC62828),
-                    fontSize: 12,
-                  ),
-                ),
-                TextButton(
-                  onPressed: _busy ? null : _loadCompanies,
-                  child: const Text('Retry'),
-                ),
-              ],
-              const SizedBox(height: 16),
-              const RequiredLabel('Company'),
-              _LookupDropdown(
-                value: _company,
-                items: _companies,
-                icon: Icons.business_outlined,
-                loading: _loadingCompanies,
-                enabled: !_busy,
-                onChanged: (value) {
-                  setState(() => _company = value);
-                  if (value != null) _loadBranches(value.id);
-                },
-              ),
-              const SizedBox(height: 14),
-              const RequiredLabel('Branch'),
-              _LookupDropdown(
-                value: _branch,
-                items: _branches,
-                icon: Icons.storefront_outlined,
-                loading: _loadingBranches,
-                enabled: !_busy && _company != null,
-                onChanged: (value) {
-                  setState(() => _branch = value);
-                  if (value != null) _loadPeriods(value.id);
-                },
-              ),
-              const SizedBox(height: 14),
-              const RequiredLabel('Period'),
-              _LookupDropdown(
-                value: _period,
-                items: _periods,
-                icon: Icons.date_range_outlined,
-                loading: _loadingPeriods,
-                enabled: !_busy && _branch != null,
-                onChanged: (value) => setState(() => _period = value),
-              ),
-              const SizedBox(height: 20),
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: AppButton(
-                      label: 'Previous',
-                      icon: Icons.arrow_back,
-                      outlined: true,
-                      onPressed: _busy ? null : _onPrevious,
+                  const PanelLogo(),
+                  const SizedBox(height: 10),
+                  const MqtBanner(),
+                  const SizedBox(height: 14),
+                  Text(
+                    username.isEmpty ? 'Select session' : 'Welcome, $username',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: AppButton(
-                      label: 'Next',
-                      icon: Icons.arrow_forward,
-                      loading: _saving,
-                      onPressed: _busy ? null : _onNext,
+                  if (_error != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFFC62828),
+                        fontSize: 12,
+                      ),
                     ),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : (_company != null &&
+                                  _branch != null &&
+                                  _period != null
+                              ? _onNext
+                              : _loadCompanies),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  const RequiredLabel('Company'),
+                  _LookupDropdown(
+                    value: _company,
+                    items: _companies,
+                    icon: Icons.business_outlined,
+                    loading: _loadingCompanies,
+                    enabled: !_busy,
+                    onChanged: (value) {
+                      setState(() => _company = value);
+                      if (value != null) _loadBranches(value.id);
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  const RequiredLabel('Branch'),
+                  _LookupDropdown(
+                    value: _branch,
+                    items: _branches,
+                    icon: Icons.storefront_outlined,
+                    loading: _loadingBranches,
+                    enabled: !_busy && _company != null,
+                    onChanged: (value) {
+                      setState(() => _branch = value);
+                      if (value != null) _loadPeriods(value.id);
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  const RequiredLabel('Period'),
+                  _LookupDropdown(
+                    value: _period,
+                    items: _periods,
+                    icon: Icons.date_range_outlined,
+                    loading: _loadingPeriods,
+                    enabled: !_busy && _branch != null,
+                    onChanged: (value) => setState(() => _period = value),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppButton(
+                          label: 'Previous',
+                          icon: Icons.arrow_back,
+                          outlined: true,
+                          onPressed: _busy ? null : _onPrevious,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: AppButton(
+                          label: 'Next',
+                          icon: Icons.arrow_forward,
+                          loading: _saving,
+                          onPressed: _busy ? null : _onNext,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
+              if (_saving) const _SessionLoader(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SessionLoader extends StatelessWidget {
+  const _SessionLoader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: AppColors.card.withValues(alpha: 0.88),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.6,
+                color: AppColors.forest,
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Loading dashboard...',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,30 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../models/dashboard_summary.dart';
 import '../services/auth_service.dart';
 import '../session/app_session.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, required this.summary});
 
-  static const _categories = [
-    (Icons.grain, 'Grains'),
-    (Icons.water_drop_outlined, 'Oilseeds'),
-    (Icons.spa_outlined, 'Pulses'),
-    (Icons.local_fire_department_outlined, 'Spices'),
-    (Icons.eco_outlined, 'Chickpeas'),
-    (Icons.pets_outlined, 'Feed'),
-    (Icons.apple_outlined, 'Dryfruits'),
-  ];
-
-  static const _services = [
-    'Origination',
-    'Processing',
-    'Branding',
-    'Merchandising',
-    'Distribution',
-  ];
+  final DashboardSummary summary;
 
   Future<void> _signOut(BuildContext context) async {
     await AuthService().logout();
@@ -38,7 +23,8 @@ class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = AppSession.instance;
-    final horizontal = MediaQuery.sizeOf(context).width >= 600 ? 28.0 : 16.0;
+    final width = MediaQuery.sizeOf(context).width;
+    final horizontal = width >= 600 ? 28.0 : 16.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7F4),
@@ -58,57 +44,40 @@ class DashboardScreen extends StatelessWidget {
                   period: session.period?.name ?? '-',
                 ),
                 const SizedBox(height: 16),
-                const Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        label: 'Established Since',
-                        value: '1975',
-                      ),
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: _YearsCard(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const _SectionTitle('Product Categories'),
-                const SizedBox(height: 8),
                 GridView.count(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: MediaQuery.sizeOf(context).width >= 600
-                      ? 4
-                      : 2,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.55,
+                  crossAxisCount: width >= 600 ? 4 : 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: width >= 600 ? 1.35 : 1.18,
                   children: [
-                    for (final item in _categories)
-                      _CategoryCard(icon: item.$1, label: item.$2),
+                    _MetricCard(
+                      icon: Icons.menu_book_outlined,
+                      label: 'Soda Book Feeding',
+                      value: _formatNumber(summary.sodaBookFeedingCount),
+                    ),
+                    _MetricCard(
+                      icon: Icons.local_shipping_outlined,
+                      label: 'Delivery Feeding',
+                      value: _formatNumber(summary.deliveryFeedingCount),
+                    ),
+                    _MetricCard(
+                      icon: Icons.pending_actions_outlined,
+                      label: 'Pending Delivery',
+                      value: _formatNumber(summary.pickedDeliveryCount),
+                    ),
+                    _MetricCard(
+                      icon: Icons.account_balance_wallet_outlined,
+                      label: 'Outstanding Balance',
+                      value: _formatNumber(summary.outstandingBalance),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                const _SectionTitle('Services'),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final service in _services) _ServiceChip(service),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Head Office · Suite # 1602, 16th Floor, Muhammadi Trade Tower, New Chali, Karachi, Pakistan.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
+                if (summary.outstandingBalances.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _BalanceTable(items: summary.outstandingBalances),
+                ],
               ],
             ),
           ),
@@ -116,6 +85,16 @@ class DashboardScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatNumber(num value) {
+  final negative = value < 0;
+  final digits = value.abs().round().toString();
+  final withCommas = digits.replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]},',
+  );
+  return negative ? '-$withCommas' : withCommas;
 }
 
 class _DashboardHeader extends StatelessWidget {
@@ -207,11 +186,11 @@ class _SessionStrip extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
             color: Color(0x14000000),
-            blurRadius: 10,
+            blurRadius: 12,
             offset: Offset(0, 3),
           ),
         ],
@@ -265,128 +244,83 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-class _StatCard extends StatelessWidget {
-  const _StatCard({required this.label, required this.value});
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
+  final IconData icon;
   final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-      decoration: BoxDecoration(
-        color: AppColors.forest,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(color: AppColors.onForest, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.onForest,
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _YearsCard extends StatelessWidget {
-  const _YearsCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.lime, width: 1.4),
-      ),
-      child: const Column(
-        children: [
-          Text(
-            '50',
-            style: TextStyle(
-              color: AppColors.forest,
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              height: 1,
-            ),
-          ),
-          Text(
-            'YEARS',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: AppColors.textDark,
-        fontWeight: FontWeight.w700,
-        fontSize: 15,
-      ),
-    );
-  }
-}
-
-class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
             color: Color(0x14000000),
-            blurRadius: 8,
-            offset: Offset(0, 2),
+            blurRadius: 12,
+            offset: Offset(0, 4),
           ),
         ],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
         children: [
-          Icon(icon, color: AppColors.forest, size: 26),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.textDark,
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(width: 4, color: AppColors.forest),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppColors.forest.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: AppColors.forest, size: 18),
+                ),
+                const Spacer(),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      color: AppColors.forest,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.25,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -395,25 +329,109 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
-class _ServiceChip extends StatelessWidget {
-  const _ServiceChip(this.label);
+class _BalanceTable extends StatelessWidget {
+  const _BalanceTable({required this.items});
 
-  final String label;
+  final List<OutstandingBalanceItem> items;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      width: double.infinity,
       decoration: BoxDecoration(
-        color: AppColors.forest.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(20),
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: AppColors.forest,
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            color: AppColors.forest.withValues(alpha: 0.08),
+            child: const Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'City',
+                    style: TextStyle(
+                      color: AppColors.forest,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  'Balance',
+                  style: TextStyle(
+                    color: AppColors.forest,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0)
+              const Divider(height: 1, color: Color(0xFFE8EEE8)),
+            _BalanceRow(
+              city: items[i].accountName.isEmpty ? '-' : items[i].accountName,
+              balance: items[i].balance,
+              shaded: i.isOdd,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BalanceRow extends StatelessWidget {
+  const _BalanceRow({
+    required this.city,
+    required this.balance,
+    required this.shaded,
+  });
+
+  final String city;
+  final num balance;
+  final bool shaded;
+
+  @override
+  Widget build(BuildContext context) {
+    final isNegative = balance < 0;
+    return ColoredBox(
+      color: shaded ? const Color(0xFFF7FAF7) : AppColors.card,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                city,
+                style: const TextStyle(
+                  color: AppColors.textDark,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              _formatNumber(balance),
+              style: TextStyle(
+                color: isNegative ? const Color(0xFFC62828) : AppColors.forest,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );

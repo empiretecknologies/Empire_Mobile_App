@@ -10,4 +10,5 @@ class ApiConfig {
   static const String company = '/api/Company';
   static const String branch = '/api/Branch';
   static const String period = '/api/Period';
+  static const String mobileDashboard = '/api/MobileDashboard';
 }

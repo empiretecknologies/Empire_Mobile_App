@@ -9,18 +9,24 @@ class LookupItem {
   final String name;
   final Map<String, dynamic> raw;
 
-  factory LookupItem.fromJson(Map<String, dynamic> json) {
+  factory LookupItem.fromJson(
+    Map<String, dynamic> json, {
+    List<String> idKeys = const ['id'],
+  }) {
     return LookupItem(
-      id: _readId(json),
+      id: _readId(json, idKeys),
       name: _readName(json),
       raw: json,
     );
   }
 
-  static List<LookupItem> listFrom(dynamic data) {
+  static List<LookupItem> listFrom(
+    dynamic data, {
+    List<String> idKeys = const ['id'],
+  }) {
     final items = <LookupItem>[];
     for (final row in _asRows(data)) {
-      final item = LookupItem.fromJson(row);
+      final item = LookupItem.fromJson(row, idKeys: idKeys);
       if (item.id != 0 || item.name.isNotEmpty) {
         items.add(item);
       }
@@ -46,17 +52,14 @@ class LookupItem {
     return const [];
   }
 
-  static int _readId(Map<String, dynamic> json) {
-    for (final entry in json.entries) {
-      final key = entry.key.toLowerCase();
-      if (key == 'id' || key.endsWith('id') || key.endsWith('_id')) {
-        final value = _asInt(entry.value);
-        if (value != null) return value;
-      }
-    }
-    for (final value in json.values) {
-      final parsed = _asInt(value);
-      if (parsed != null) return parsed;
+  static int _readId(Map<String, dynamic> json, List<String> idKeys) {
+    final lowered = <String, dynamic>{
+      for (final entry in json.entries) entry.key.toLowerCase(): entry.value,
+    };
+
+    for (final key in idKeys) {
+      final value = _asInt(lowered[key.toLowerCase()]);
+      if (value != null) return value;
     }
     return 0;
   }

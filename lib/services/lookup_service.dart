@@ -9,7 +9,10 @@ class LookupService {
 
   Future<List<LookupItem>> getCompanies() async {
     final response = await _client.get(ApiConfig.company);
-    return LookupItem.listFrom(response.data);
+    return LookupItem.listFrom(
+      response.data,
+      idKeys: const ['ccode'],
+    );
   }
 
   Future<List<LookupItem>> getBranches({required int companyId}) async {
@@ -17,7 +20,10 @@ class LookupService {
       ApiConfig.branch,
       query: {'companyId': '$companyId'},
     );
-    return LookupItem.listFrom(response.data);
+    return LookupItem.listFrom(
+      response.data,
+      idKeys: const ['bcode'],
+    );
   }
 
   Future<List<LookupItem>> getPeriods({required int branchId}) async {
@@ -25,6 +31,9 @@ class LookupService {
       ApiConfig.period,
       query: {'branchId': '$branchId'},
     );
-    return LookupItem.listFrom(response.data);
+    return LookupItem.listFrom(
+      response.data,
+      idKeys: const ['pid'],
+    );
   }
 }
