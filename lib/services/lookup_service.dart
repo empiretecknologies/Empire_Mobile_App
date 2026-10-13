@@ -11,7 +11,7 @@ class LookupService {
     final response = await _client.get(ApiConfig.company);
     return LookupItem.listFrom(
       response.data,
-      idKeys: const ['ccode'],
+      idKeys: const ['ccode', 'companyId', 'companyCode', 'id', 'code'],
     );
   }
 
@@ -22,7 +22,7 @@ class LookupService {
     );
     return LookupItem.listFrom(
       response.data,
-      idKeys: const ['bcode'],
+      idKeys: const ['bcode', 'branchId', 'branchCode', 'id', 'code'],
     );
   }
 
@@ -33,7 +33,7 @@ class LookupService {
     );
     return LookupItem.listFrom(
       response.data,
-      idKeys: const ['pid'],
+      idKeys: const ['pid', 'periodId', 'periodCode', 'id', 'code'],
     );
   }
 }

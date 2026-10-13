@@ -1,22 +1,172 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../api/api_client.dart';
 import '../models/dashboard_summary.dart';
 import '../services/auth_service.dart';
+import '../services/dashboard_service.dart';
 import '../session/app_session.dart';
 import '../theme/app_theme.dart';
+import '../widgets/page_header.dart';
+import 'city_outstanding_screen.dart';
 import 'login_screen.dart';
+import 'profile_screen.dart';
 
-class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key, required this.summary});
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key, required this.onMenu, this.initialSummary});
 
-  final DashboardSummary summary;
+  final DashboardSummary? initialSummary;
+  final VoidCallback onMenu;
 
-  Future<void> _signOut(BuildContext context) async {
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  final _dashboardService = DashboardService();
+
+  bool _countsLoading = true;
+  bool _balancesLoading = true;
+  bool _balanceFromOutstanding = false;
+  bool _leaving = false;
+  String? _countsError;
+  String? _balancesError;
+  num? _soda;
+  num? _delivery;
+  num? _pending;
+  num? _outstanding;
+  List<OutstandingBalanceItem> _balances = const [];
+
+  bool get _backgroundLoading => _countsLoading || _balancesLoading;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialSummary;
+    if (initial != null) {
+      _soda = initial.sodaBookFeedingCount;
+      _delivery = initial.deliveryFeedingCount;
+      _pending = initial.pickedDeliveryCount;
+      _outstanding = initial.outstandingBalance;
+      _balances = initial.outstandingBalances;
+      _countsLoading = false;
+      _balancesLoading = false;
+      return;
+    }
+    unawaited(_saveContext());
+    unawaited(_loadCounts());
+    unawaited(_loadOutstanding());
+  }
+
+  Future<void> _saveContext() async {
+    final session = AppSession.instance;
+    try {
+      await AuthService().saveContext(
+        company: '${session.ccode}',
+        branch: '${session.bcode}',
+        period: '${session.pid}',
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.isUnauthorized) _leave();
+    }
+  }
+
+  Future<void> _loadCounts() async {
+    if (!_countsLoading && mounted) {
+      setState(() {
+        _countsLoading = true;
+        _countsError = null;
+      });
+    }
+    try {
+      final counts = await _dashboardService.getCounts();
+      if (!mounted) return;
+      setState(() {
+        _soda = counts.sodaBookFeedingCount;
+        _delivery = counts.deliveryFeedingCount;
+        _pending = counts.pickedDeliveryCount;
+        if (counts.outstandingBalance != null && !_balanceFromOutstanding) {
+          _outstanding = counts.outstandingBalance;
+        }
+        _countsLoading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.isUnauthorized) {
+        _leave();
+        return;
+      }
+      setState(() {
+        _countsLoading = false;
+        _countsError = error.message;
+      });
+    }
+  }
+
+  Future<void> _loadOutstanding() async {
+    if (!_balancesLoading && mounted) {
+      setState(() {
+        _balancesLoading = true;
+        _balancesError = null;
+      });
+    }
+    try {
+      final outstanding = await _dashboardService.getOutstanding();
+      if (!mounted) return;
+      setState(() {
+        _balances = outstanding.items;
+        if (outstanding.outstandingBalance != null) {
+          _outstanding = outstanding.outstandingBalance;
+          _balanceFromOutstanding = true;
+        }
+        _balancesLoading = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.isUnauthorized) {
+        _leave();
+        return;
+      }
+      setState(() {
+        _balancesLoading = false;
+        _balancesError = error.message;
+      });
+    }
+  }
+
+  Future<void> _signOut() async {
     await AuthService().logout();
-    if (!context.mounted) return;
+    if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
       (route) => false,
+    );
+  }
+
+  void _leave() {
+    if (_leaving || !mounted) return;
+    _leaving = true;
+    AppSession.instance.clear();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
+  void _openProfile() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const ProfileScreen()));
+  }
+
+  void _openCity(String city) {
+    final name = city.trim();
+    if (name.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CityOutstandingScreen(city: name),
+      ),
     );
   }
 
@@ -25,145 +175,183 @@ class DashboardScreen extends StatelessWidget {
     final session = AppSession.instance;
     final width = MediaQuery.sizeOf(context).width;
     final horizontal = width >= 600 ? 28.0 : 16.0;
+    final username = session.username ?? '';
+    final showBalances =
+        _balancesLoading || _balancesError != null || _balances.isNotEmpty;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F4),
-      body: Column(
-        children: [
-          _DashboardHeader(
-            username: session.username ?? '',
-            onSignOut: () => _signOut(context),
+    return Column(
+      children: [
+        PageHeader(
+          title: 'MQT Dashboard',
+          subtitle: username.isEmpty ? 'Mast Qalander' : 'Welcome, $username',
+          onMenu: widget.onMenu,
+          trailing: _ProfileMenu(onProfile: _openProfile, onLogout: _signOut),
+        ),
+        if (_backgroundLoading)
+          const LinearProgressIndicator(
+            minHeight: 3,
+            color: AppColors.lime,
+            backgroundColor: AppColors.forestMid,
           ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 24),
-              children: [
-                _SessionStrip(
-                  company: session.company?.name ?? '-',
-                  branch: session.branch?.name ?? '-',
-                  period: session.period?.name ?? '-',
-                ),
-                const SizedBox(height: 16),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: width >= 600 ? 4 : 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: width >= 600 ? 1.35 : 1.18,
-                  children: [
-                    _MetricCard(
-                      icon: Icons.menu_book_outlined,
-                      label: 'Soda Book Feeding',
-                      value: _formatNumber(summary.sodaBookFeedingCount),
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 24),
+            children: [
+              _SessionStrip(
+                company: session.company?.name ?? '-',
+                branch: session.branch?.name ?? '-',
+                period: session.period?.name ?? '-',
+              ),
+              const SizedBox(height: 16),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: width >= 600 ? 4 : 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: width >= 600 ? 1.35 : 1.18,
+                children: [
+                  _MetricCard(
+                    icon: Icons.menu_book_outlined,
+                    label: 'Soda Book Feeding',
+                    value: _metricValue(_soda, _countsLoading),
+                    loading: _soda == null && _countsLoading,
+                  ),
+                  _MetricCard(
+                    icon: Icons.local_shipping_outlined,
+                    label: 'Delivery Feeding',
+                    value: _metricValue(_delivery, _countsLoading),
+                    loading: _delivery == null && _countsLoading,
+                  ),
+                  _MetricCard(
+                    icon: Icons.pending_actions_outlined,
+                    label: 'Pending Delivery',
+                    value: _metricValue(_pending, _countsLoading),
+                    loading: _pending == null && _countsLoading,
+                  ),
+                  _MetricCard(
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Outstanding Balance',
+                    value: _metricValue(
+                      _outstanding,
+                      _countsLoading || _balancesLoading,
                     ),
-                    _MetricCard(
-                      icon: Icons.local_shipping_outlined,
-                      label: 'Delivery Feeding',
-                      value: _formatNumber(summary.deliveryFeedingCount),
-                    ),
-                    _MetricCard(
-                      icon: Icons.pending_actions_outlined,
-                      label: 'Pending Delivery',
-                      value: _formatNumber(summary.pickedDeliveryCount),
-                    ),
-                    _MetricCard(
-                      icon: Icons.account_balance_wallet_outlined,
-                      label: 'Outstanding Balance',
-                      value: _formatNumber(summary.outstandingBalance),
-                    ),
-                  ],
-                ),
-                if (summary.outstandingBalances.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _BalanceTable(items: summary.outstandingBalances),
+                    loading:
+                        _outstanding == null &&
+                        (_countsLoading || _balancesLoading),
+                  ),
                 ],
+              ),
+              if (_countsError != null) ...[
+                const SizedBox(height: 8),
+                _SectionMessage(
+                  message: _countsError!,
+                  onRetry: () {
+                    _loadCounts();
+                  },
+                ),
               ],
-            ),
+              if (showBalances) ...[
+                const SizedBox(height: 16),
+                _BalanceTable(
+                  items: _balances,
+                  loading: _balancesLoading && _balances.isEmpty,
+                  error: _balancesError,
+                  onRetry: () {
+                    _loadOutstanding();
+                  },
+                  onCity: _openCity,
+                ),
+              ],
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
+    );
+  }
+
+  String _metricValue(num? value, bool loading) {
+    if (value == null) return loading ? '' : '-';
+    return formatDashboardNumber(value);
+  }
+}
+
+class _ProfileMenu extends StatelessWidget {
+  const _ProfileMenu({required this.onProfile, required this.onLogout});
+
+  final VoidCallback onProfile;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Profile',
+      position: PopupMenuPosition.under,
+      color: AppTheme.cardColor(context),
+      icon: const Icon(Icons.person, color: AppColors.onForest),
+      onSelected: (value) {
+        if (value == 'profile') onProfile();
+        if (value == 'logout') onLogout();
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          value: 'profile',
+          child: _ProfileMenuRow(icon: Icons.person_outline, label: 'Profile'),
+        ),
+        PopupMenuItem<String>(
+          value: 'logout',
+          child: _ProfileMenuRow(icon: Icons.logout, label: 'Logout'),
+        ),
+      ],
     );
   }
 }
 
-String _formatNumber(num value) {
-  final negative = value < 0;
-  final digits = value.abs().round().toString();
-  final withCommas = digits.replaceAllMapped(
-    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-    (match) => '${match[1]},',
-  );
-  return negative ? '-$withCommas' : withCommas;
-}
+class _ProfileMenuRow extends StatelessWidget {
+  const _ProfileMenuRow({required this.icon, required this.label});
 
-class _DashboardHeader extends StatelessWidget {
-  const _DashboardHeader({
-    required this.username,
-    required this.onSignOut,
-  });
-
-  final String username;
-  final VoidCallback onSignOut;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.fromLTRB(
-        16,
-        MediaQuery.paddingOf(context).top + 12,
-        8,
-        16,
-      ),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppColors.forestDeep, AppColors.forestMid],
+    final iconColor = AppTheme.isDark(context)
+        ? AppColors.lime
+        : AppColors.forest;
+    return Row(
+      children: [
+        Icon(icon, color: iconColor, size: 20),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.primaryText(context),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.onForest.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.eco_rounded, color: AppColors.lime),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'MQT Dashboard',
-                  style: TextStyle(
-                    color: AppColors.onForest,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                  ),
-                ),
-                Text(
-                  username.isEmpty ? 'Mast Qalander' : 'Welcome, $username',
-                  style: const TextStyle(
-                    color: AppColors.limeSoft,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: onSignOut,
-            icon: const Icon(Icons.logout, color: AppColors.onForest),
-          ),
-        ],
-      ),
+      ],
+    );
+  }
+}
+
+class _SectionMessage extends StatelessWidget {
+  const _SectionMessage({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xFFC62828), fontSize: 12),
+        ),
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
     );
   }
 }
@@ -185,7 +373,7 @@ class _SessionStrip extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppTheme.cardColor(context),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
@@ -222,8 +410,8 @@ class _SessionRow extends StatelessWidget {
           width: 72,
           child: Text(
             label,
-            style: const TextStyle(
-              color: AppColors.textMuted,
+            style: TextStyle(
+              color: AppTheme.secondaryText(context),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -232,8 +420,8 @@ class _SessionRow extends StatelessWidget {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              color: AppColors.textDark,
+            style: TextStyle(
+              color: AppTheme.primaryText(context),
               fontSize: 13,
               fontWeight: FontWeight.w600,
             ),
@@ -249,17 +437,19 @@ class _MetricCard extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    required this.loading,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppTheme.cardColor(context),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
@@ -293,28 +483,38 @@ class _MetricCard extends StatelessWidget {
                   child: Icon(icon, color: AppColors.forest, size: 18),
                 ),
                 const Spacer(),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    maxLines: 1,
-                    style: const TextStyle(
+                if (loading)
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
                       color: AppColors.forest,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      height: 1.1,
-                      letterSpacing: -0.3,
+                    ),
+                  )
+                else
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: AppColors.forest,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                        letterSpacing: -0.3,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 4),
                 Text(
                   label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
+                  style: TextStyle(
+                    color: AppTheme.secondaryText(context),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     height: 1.25,
@@ -330,16 +530,26 @@ class _MetricCard extends StatelessWidget {
 }
 
 class _BalanceTable extends StatelessWidget {
-  const _BalanceTable({required this.items});
+  const _BalanceTable({
+    required this.items,
+    required this.loading,
+    required this.error,
+    required this.onRetry,
+    required this.onCity,
+  });
 
   final List<OutstandingBalanceItem> items;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
+  final ValueChanged<String> onCity;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppTheme.cardColor(context),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(
@@ -375,18 +585,51 @@ class _BalanceTable extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                SizedBox(width: 22),
               ],
             ),
           ),
-          for (var i = 0; i < items.length; i++) ...[
-            if (i > 0)
-              const Divider(height: 1, color: Color(0xFFE8EEE8)),
-            _BalanceRow(
-              city: items[i].accountName.isEmpty ? '-' : items[i].accountName,
-              balance: items[i].balance,
-              shaded: i.isOdd,
-            ),
-          ],
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 22),
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      color: AppColors.forest,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Loading balances...',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (error != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: _SectionMessage(message: error!, onRetry: onRetry),
+            )
+          else
+            for (var i = 0; i < items.length; i++) ...[
+              if (i > 0)
+                Divider(height: 1, color: AppTheme.dividerColor(context)),
+              _BalanceRow(
+                city: items[i].accountName,
+                balance: items[i].balance,
+                shaded: i.isOdd,
+                onTap: () => onCity(items[i].accountName),
+              ),
+            ],
         ],
       ),
     );
@@ -398,40 +641,56 @@ class _BalanceRow extends StatelessWidget {
     required this.city,
     required this.balance,
     required this.shaded,
+    required this.onTap,
   });
 
   final String city;
   final num balance;
   final bool shaded;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final isNegative = balance < 0;
-    return ColoredBox(
-      color: shaded ? const Color(0xFFF7FAF7) : AppColors.card,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                city,
-                style: const TextStyle(
-                  color: AppColors.textDark,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: ColoredBox(
+        color: shaded
+            ? AppTheme.zebraColor(context)
+            : AppTheme.cardColor(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  city,
+                  style: TextStyle(
+                    color: AppTheme.primaryText(context),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            Text(
-              _formatNumber(balance),
-              style: TextStyle(
-                color: isNegative ? const Color(0xFFC62828) : AppColors.forest,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+              Text(
+                formatDashboardNumber(balance),
+                style: TextStyle(
+                  color: isNegative
+                      ? const Color(0xFFC62828)
+                      : AppColors.forest,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: AppTheme.secondaryText(context),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -59,7 +59,19 @@ class LookupItem {
 
     for (final key in idKeys) {
       final value = _asInt(lowered[key.toLowerCase()]);
-      if (value != null) return value;
+      if (value != null && value != 0) return value;
+    }
+
+    for (final key in const ['id', 'code']) {
+      final value = _asInt(lowered[key]);
+      if (value != null && value != 0) return value;
+    }
+
+    for (final entry in lowered.entries) {
+      if (entry.key.contains('code') || entry.key.endsWith('id')) {
+        final value = _asInt(entry.value);
+        if (value != null && value != 0) return value;
+      }
     }
     return 0;
   }

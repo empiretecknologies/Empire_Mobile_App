@@ -3,14 +3,13 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/lookup_item.dart';
 import '../services/auth_service.dart';
-import '../services/dashboard_service.dart';
 import '../services/lookup_service.dart';
 import '../session/app_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_button.dart';
 import '../widgets/branded_shell.dart';
-import 'dashboard_screen.dart';
 import 'login_screen.dart';
+import 'main_shell.dart';
 
 class SessionScreen extends StatefulWidget {
   const SessionScreen({super.key});
@@ -22,7 +21,6 @@ class SessionScreen extends StatefulWidget {
 class _SessionScreenState extends State<SessionScreen> {
   final _lookupService = LookupService();
   final _authService = AuthService();
-  final _dashboardService = DashboardService();
 
   List<LookupItem> _companies = [];
   List<LookupItem> _branches = [];
@@ -35,7 +33,6 @@ class _SessionScreenState extends State<SessionScreen> {
   bool _loadingCompanies = true;
   bool _loadingBranches = false;
   bool _loadingPeriods = false;
-  bool _saving = false;
   String? _error;
 
   @override
@@ -70,7 +67,27 @@ class _SessionScreenState extends State<SessionScreen> {
     }
   }
 
+  Future<void> _retry() async {
+    if (_companies.isEmpty || _company == null) {
+      await _loadCompanies();
+    } else if (_branches.isEmpty || _branch == null) {
+      await _loadBranches(_company!.id);
+    } else if (_periods.isEmpty || _period == null) {
+      await _loadPeriods(_branch!.id);
+    } else {
+      await _onNext();
+    }
+  }
+
   Future<void> _loadBranches(int companyId) async {
+    if (companyId == 0) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Company code is missing. Please select another company.';
+        _loadingBranches = false;
+      });
+      return;
+    }
     setState(() {
       _loadingBranches = true;
       _error = null;
@@ -95,6 +112,14 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Future<void> _loadPeriods(int branchId) async {
+    if (branchId == 0) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Branch code is missing. Please select another branch.';
+        _loadingPeriods = false;
+      });
+      return;
+    }
     setState(() {
       _loadingPeriods = true;
       _error = null;
@@ -150,36 +175,17 @@ class _SessionScreenState extends State<SessionScreen> {
       return;
     }
 
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      AppSession.instance
-        ..company = _company
-        ..branch = _branch
-        ..period = _period;
-      await _authService.saveContext(
-        company: '${AppSession.instance.ccode}',
-        branch: '${AppSession.instance.bcode}',
-        period: '${AppSession.instance.pid}',
-      );
-      final summary = await _dashboardService.getDashboard();
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => DashboardScreen(summary: summary),
-        ),
-      );
-    } on ApiException catch (error) {
-      await _handleError(error);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
+    AppSession.instance
+      ..company = _company
+      ..branch = _branch
+      ..period = _period;
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const MainShell()),
+    );
   }
 
-  bool get _busy =>
-      _loadingCompanies || _loadingBranches || _loadingPeriods || _saving;
+  bool get _busy => _loadingCompanies || _loadingBranches || _loadingPeriods;
 
   @override
   Widget build(BuildContext context) {
@@ -193,142 +199,95 @@ class _SessionScreenState extends State<SessionScreen> {
           icon: const Icon(Icons.logout, color: AppColors.onForest),
         ),
         child: WhitePanel(
-          child: Stack(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              const PanelLogo(),
+              const SizedBox(height: 10),
+              const MqtBanner(),
+              const SizedBox(height: 14),
+              Text(
+                username.isEmpty ? 'Select session' : 'Welcome, $username',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFFC62828),
+                    fontSize: 12,
+                  ),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : _retry,
+                  child: const Text('Retry'),
+                ),
+              ],
+              const SizedBox(height: 16),
+              const RequiredLabel('Company'),
+              _LookupDropdown(
+                value: _company,
+                items: _companies,
+                icon: Icons.business_outlined,
+                loading: _loadingCompanies,
+                enabled: !_busy,
+                onChanged: (value) {
+                  setState(() => _company = value);
+                  if (value != null) _loadBranches(value.id);
+                },
+              ),
+              const SizedBox(height: 14),
+              const RequiredLabel('Branch'),
+              _LookupDropdown(
+                value: _branch,
+                items: _branches,
+                icon: Icons.storefront_outlined,
+                loading: _loadingBranches,
+                enabled: !_busy && _company != null,
+                onChanged: (value) {
+                  setState(() => _branch = value);
+                  if (value != null) _loadPeriods(value.id);
+                },
+              ),
+              const SizedBox(height: 14),
+              const RequiredLabel('Period'),
+              _LookupDropdown(
+                value: _period,
+                items: _periods,
+                icon: Icons.date_range_outlined,
+                loading: _loadingPeriods,
+                enabled: !_busy && _branch != null,
+                onChanged: (value) => setState(() => _period = value),
+              ),
+              const SizedBox(height: 20),
+              Row(
                 children: [
-                  const PanelLogo(),
-                  const SizedBox(height: 10),
-                  const MqtBanner(),
-                  const SizedBox(height: 14),
-                  Text(
-                    username.isEmpty ? 'Select session' : 'Welcome, $username',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
+                  Expanded(
+                    child: AppButton(
+                      label: 'Previous',
+                      icon: Icons.arrow_back,
+                      outlined: true,
+                      onPressed: _busy ? null : _onPrevious,
                     ),
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _error!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFFC62828),
-                        fontSize: 12,
-                      ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: AppButton(
+                      label: 'Next',
+                      icon: Icons.arrow_forward,
+                      onPressed: _busy ? null : _onNext,
                     ),
-                    TextButton(
-                      onPressed: _busy
-                          ? null
-                          : (_company != null &&
-                                  _branch != null &&
-                                  _period != null
-                              ? _onNext
-                              : _loadCompanies),
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  const RequiredLabel('Company'),
-                  _LookupDropdown(
-                    value: _company,
-                    items: _companies,
-                    icon: Icons.business_outlined,
-                    loading: _loadingCompanies,
-                    enabled: !_busy,
-                    onChanged: (value) {
-                      setState(() => _company = value);
-                      if (value != null) _loadBranches(value.id);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  const RequiredLabel('Branch'),
-                  _LookupDropdown(
-                    value: _branch,
-                    items: _branches,
-                    icon: Icons.storefront_outlined,
-                    loading: _loadingBranches,
-                    enabled: !_busy && _company != null,
-                    onChanged: (value) {
-                      setState(() => _branch = value);
-                      if (value != null) _loadPeriods(value.id);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  const RequiredLabel('Period'),
-                  _LookupDropdown(
-                    value: _period,
-                    items: _periods,
-                    icon: Icons.date_range_outlined,
-                    loading: _loadingPeriods,
-                    enabled: !_busy && _branch != null,
-                    onChanged: (value) => setState(() => _period = value),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppButton(
-                          label: 'Previous',
-                          icon: Icons.arrow_back,
-                          outlined: true,
-                          onPressed: _busy ? null : _onPrevious,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: AppButton(
-                          label: 'Next',
-                          icon: Icons.arrow_forward,
-                          loading: _saving,
-                          onPressed: _busy ? null : _onNext,
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
-              if (_saving) const _SessionLoader(),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SessionLoader extends StatelessWidget {
-  const _SessionLoader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: ColoredBox(
-        color: AppColors.card.withValues(alpha: 0.88),
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.6,
-                color: AppColors.forest,
-              ),
-            ),
-            SizedBox(height: 12),
-            Text(
-              'Loading dashboard...',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -367,19 +326,16 @@ class _LookupDropdown extends StatelessWidget {
       );
     }
 
-    final selected =
-        value != null && items.any((item) => item.id == value!.id)
-            ? value
-            : null;
+    final selected = value != null && items.any((item) => item.id == value!.id)
+        ? value
+        : null;
 
     return DropdownButtonFormField<LookupItem>(
       key: ValueKey('${items.map((e) => e.id).join('-')}-$selected'),
       initialValue: selected,
       isExpanded: true,
       icon: const Icon(Icons.keyboard_arrow_down),
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon),
-      ),
+      decoration: InputDecoration(prefixIcon: Icon(icon)),
       hint: const Text('Select'),
       items: [
         for (final item in items)

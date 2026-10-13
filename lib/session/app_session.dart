@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/lookup_item.dart';
 
 class AppSession {
@@ -11,6 +13,7 @@ class AppSession {
   LookupItem? company;
   LookupItem? branch;
   LookupItem? period;
+  final ValueNotifier<Uint8List?> profileImage = ValueNotifier<Uint8List?>(null);
 
   bool get isLoggedIn => token != null && token!.isNotEmpty;
 
@@ -25,5 +28,6 @@ class AppSession {
     company = null;
     branch = null;
     period = null;
+    profileImage.value = null;
   }
 }
