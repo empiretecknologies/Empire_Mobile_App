@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../api/api_client.dart';
+import '../services/auth_service.dart';
+import '../session/app_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_button.dart';
 import '../widgets/branded_shell.dart';
-import 'dashboard_screen.dart';
+import 'forgot_password_screen.dart';
+import 'session_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
+  final _authService = AuthService();
 
   bool _obscurePassword = true;
   bool _rememberPassword = true;
@@ -38,30 +43,40 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
     try {
-      // LOGIN API INTEGRATION POINT
-      // Replace the delay below with the provided login endpoint call.
-      // Use: username = _usernameController.text.trim()
-      //      password = _passwordController.text
-      //      rememberPassword = _rememberPassword
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (_) => DashboardScreen(
-            username: _usernameController.text.trim(),
-          ),
-        ),
+      await _authService.login(
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+        isRemember: _rememberPassword,
       );
+      if (!mounted) return;
+
+      if (AppSession.instance.requireChangePassword) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder: (_) => ForgotPasswordScreen(
+              username: AppSession.instance.username ?? '',
+              startAtReset: true,
+            ),
+          ),
+        );
+        return;
+      }
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const SessionScreen()),
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      _showMessage(error.message);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _onForgotPassword() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Password recovery will be available soon.')),
-    );
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -85,7 +100,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   enabled: !_isLoading,
                   textInputAction: TextInputAction.next,
                   autofillHints: const [AutofillHints.username],
-                  keyboardType: TextInputType.text,
                   decoration: const InputDecoration(
                     hintText: 'User Name',
                     prefixIcon: Icon(Icons.person_outline),
@@ -185,7 +199,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 Align(
                   alignment: Alignment.center,
                   child: TextButton(
-                    onPressed: _isLoading ? null : _onForgotPassword,
+                    onPressed: _isLoading
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const ForgotPasswordScreen(),
+                              ),
+                            );
+                          },
                     child: const Text(
                       'Forgot password?',
                       style: TextStyle(

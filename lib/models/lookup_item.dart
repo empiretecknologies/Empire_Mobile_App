@@ -1,0 +1,132 @@
+class LookupItem {
+  const LookupItem({
+    required this.id,
+    required this.name,
+    this.raw = const {},
+  });
+
+  final int id;
+  final String name;
+  final Map<String, dynamic> raw;
+
+  factory LookupItem.fromJson(
+    Map<String, dynamic> json, {
+    List<String> idKeys = const ['id'],
+  }) {
+    return LookupItem(
+      id: _readId(json, idKeys),
+      name: _readName(json),
+      raw: json,
+    );
+  }
+
+  static List<LookupItem> listFrom(
+    dynamic data, {
+    List<String> idKeys = const ['id'],
+  }) {
+    final items = <LookupItem>[];
+    for (final row in _asRows(data)) {
+      final item = LookupItem.fromJson(row, idKeys: idKeys);
+      if (item.id != 0 || item.name.isNotEmpty) {
+        items.add(item);
+      }
+    }
+    return items;
+  }
+
+  static List<Map<String, dynamic>> _asRows(dynamic data) {
+    if (data == null) return const [];
+    if (data is List) {
+      return [
+        for (final row in data)
+          if (row is Map) Map<String, dynamic>.from(row),
+      ];
+    }
+    if (data is Map) {
+      final map = Map<String, dynamic>.from(data);
+      for (final value in map.values) {
+        if (value is List) return _asRows(value);
+      }
+      return [map];
+    }
+    return const [];
+  }
+
+  static int _readId(Map<String, dynamic> json, List<String> idKeys) {
+    final lowered = <String, dynamic>{
+      for (final entry in json.entries) entry.key.toLowerCase(): entry.value,
+    };
+
+    for (final key in idKeys) {
+      final value = _asInt(lowered[key.toLowerCase()]);
+      if (value != null && value != 0) return value;
+    }
+
+    for (final key in const ['id', 'code']) {
+      final value = _asInt(lowered[key]);
+      if (value != null && value != 0) return value;
+    }
+
+    for (final entry in lowered.entries) {
+      if (entry.key.contains('code') || entry.key.endsWith('id')) {
+        final value = _asInt(entry.value);
+        if (value != null && value != 0) return value;
+      }
+    }
+    return 0;
+  }
+
+  static String _readName(Map<String, dynamic> json) {
+    for (final entry in json.entries) {
+      final key = entry.key.toLowerCase();
+      if (key.contains('name') &&
+          entry.value != null &&
+          entry.value.toString().trim().isNotEmpty) {
+        return entry.value.toString().trim();
+      }
+    }
+
+    String? from;
+    String? to;
+    for (final entry in json.entries) {
+      final key = entry.key.toLowerCase();
+      if (from == null && (key.contains('from') || key.contains('start'))) {
+        from = entry.value?.toString();
+      }
+      if (to == null &&
+          (key.contains('to') || key.contains('end')) &&
+          !key.contains('token')) {
+        to = entry.value?.toString();
+      }
+    }
+    if (from != null &&
+        from.trim().isNotEmpty &&
+        to != null &&
+        to.trim().isNotEmpty) {
+      return 'From ${from.trim()} To ${to.trim()}';
+    }
+
+    for (final entry in json.entries) {
+      final key = entry.key.toLowerCase();
+      if (entry.value is String &&
+          entry.value.toString().trim().isNotEmpty &&
+          !key.contains('id')) {
+        return entry.value.toString().trim();
+      }
+    }
+    return json['id']?.toString() ?? '';
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is LookupItem && other.id == id && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(id, name);
+}
