@@ -1,6 +1,6 @@
 {
-    "name": "empire_app",
-    "short_name": "empire_app",
+    "name": "Mast Qalander",
+    "short_name": "Mast Qalander",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
