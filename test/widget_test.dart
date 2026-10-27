@@ -274,6 +274,30 @@ void main() {
     expect(parties.first.name, 'Ali Traders');
     expect(parties.last.code, 'C200');
     expect(parties.last.name, 'C200');
+
+    final apiParties = SodaOption.listFrom([
+      {
+        'key': 161,
+        'customizedKey': '161116',
+        'value': 'MOHD ALI MOTI',
+        'accountCode': 116,
+        'disc': 0,
+        'commission': null,
+      },
+      {
+        'key': 162,
+        'customizedKey': '162117',
+        'value': 'ASAN TRADERS',
+        'accountCode': 117,
+      },
+    ]);
+    expect(apiParties.length, 2);
+    expect(apiParties.first.code, '161');
+    expect(apiParties.first.name, 'MOHD ALI MOTI');
+    expect(sodaActCode(apiParties.first.raw), 116);
+    expect(apiParties.last.code, '162');
+    expect(apiParties.last.name, 'ASAN TRADERS');
+    expect(sodaActCode(apiParties.last.raw), 117);
   });
 
   test('API messages strip HTML and SQL timeout text', () {

@@ -124,10 +124,10 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     }
     setState(() {
       _statuses = results[0];
-      _movements = results[1];
+      _movements = _movementOptions(results[1]);
       _parties = results[2];
       _conditions = results[3];
-      _types = results[4];
+      _types = _sbfTypeOptions(results[4]);
       _currencies = results[5];
       _units = results[6];
       _sodaTypes = results[7];
@@ -202,7 +202,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
         _dateFrom(sodaFieldLoose(_master, 'v_DATE')) ?? DateTime.now();
     _dueDate = _dateFrom(sodaFieldLoose(_master, 'duE_DATE'));
     _shipDate = _dateFrom(sodaFieldLoose(_master, 'shiP_DATE'));
-    _type = sodaCode(sodaFieldLoose(_master, 'sbF_TYPE'));
+    _type = _sbfTypeCode(sodaCode(sodaFieldLoose(_master, 'sbF_TYPE')));
     _sodaType = sodaCode(sodaFieldLoose(_master, 'sodA_TYPE'));
     _seller = sodaCode(sodaFieldLoose(_master, 'selleR_CODE'));
     _buyer = sodaCode(sodaFieldLoose(_master, 'buyeR_CODE'));
@@ -211,7 +211,9 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _currency = sodaCode(sodaFieldLoose(_master, 'curR_CODE'));
     _unit = sodaCode(sodaFieldLoose(_master, 'unit'));
     _status = sodaCode(sodaFieldLoose(_master, 'shiP_STATUS'));
-    _movement = sodaCode(sodaFieldLoose(_master, 'p_S'));
+    _movement = _movementCode(
+      sodaCode(sodaFieldLoose(_master, 'p_S')),
+    );
     for (final row in document.detail) {
       _lines.add(_lineFrom(row));
     }
@@ -330,7 +332,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     sodaSetField(master, 'traN_ID', _tranId);
     sodaSetField(master, 'v_DATE', _dateToApi(_voucherDate));
     sodaSetField(master, 'voucheR_NO', _blank(_voucherNo.text));
-    sodaSetField(master, 'sbF_TYPE', _blank(_type));
+    sodaSetField(master, 'sbF_TYPE', _sbfTypeCode(_type));
     sodaSetField(master, 'sodA_TYPE', _blank(_sodaType));
     sodaSetField(master, 'selleR_CODE', _blank(_seller));
     sodaSetField(master, 'buyeR_CODE', _blank(_buyer));
@@ -343,7 +345,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     sodaSetField(master, 'duE_DATE', _dateToApi(_dueDate));
     sodaSetField(master, 'shiP_DATE', _dateToApi(_shipDate));
     sodaSetField(master, 'shiP_STATUS', _apiInt(_status));
-    sodaSetField(master, 'p_S', _blank(_movement));
+    sodaSetField(master, 'p_S', _movementCode(_movement));
     sodaSetField(master, 'ref', _blank(_ref.text));
     sodaSetField(master, 'remarks', _blank(_remarks.text));
     sodaSetField(master, 'bcode', session.bcode);
@@ -553,7 +555,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
           ),
           _pair(
             _lookup('Type', _type, _types, (value) {
-              setState(() => _type = value);
+              setState(() => _type = _sbfTypeCode(value));
             }),
             _lookup('Soda Type', _sodaType, _sodaTypes, (value) {
               setState(() => _sodaType = value);
@@ -605,7 +607,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
               setState(() => _status = value);
             }),
             _lookup('Movement', _movement, _movements, (value) {
-              setState(() => _movement = value);
+              setState(() => _movement = _movementCode(value));
             }),
           ),
           _text('Reference #', _ref),
@@ -1736,6 +1738,70 @@ class _VoucherSheetState extends State<_VoucherSheet> {
       ],
     );
   }
+}
+
+/// Maps Type labels/codes to the 3-char `SBF_TYPE` values expected by the DB.
+String? _sbfTypeCode(String? value, {String? name}) {
+  for (final candidate in [value, name]) {
+    if (candidate == null) continue;
+    final text = candidate.trim().toUpperCase();
+    if (text.isEmpty) continue;
+    if (text == 'LOC' || text == 'LOCAL') return 'LOC';
+    if (text == 'IMP' || text == 'IMPORT') return 'IMP';
+    if (text == 'EXP' || text == 'EXPORT') return 'EXP';
+  }
+  return null;
+}
+
+String _sbfTypeName(String code, String fallback) {
+  final text = fallback.trim();
+  final upper = text.toUpperCase();
+  switch (code) {
+    case 'LOC':
+      return upper == 'LOC' || text.isEmpty ? 'Local' : text;
+    case 'IMP':
+      return upper == 'IMP' || text.isEmpty ? 'Import' : text;
+    case 'EXP':
+      return upper == 'EXP' || text.isEmpty ? 'Export' : text;
+    default:
+      return text.isEmpty ? code : text;
+  }
+}
+
+List<SodaOption> _sbfTypeOptions(List<SodaOption> items) {
+  final options = <SodaOption>[];
+  final seen = <String>{};
+  for (final item in items) {
+    final code = _sbfTypeCode(item.code, name: item.name);
+    if (code == null || !seen.add(code)) continue;
+    options.add(
+      SodaOption(code: code, name: _sbfTypeName(code, item.name), raw: item.raw),
+    );
+  }
+  return options;
+}
+
+/// First two characters of the Movement label/code (e.g. Sale → SA).
+String? _movementCode(String? value, {String? name}) {
+  for (final candidate in [name, value]) {
+    if (candidate == null) continue;
+    final text = candidate.trim().toUpperCase();
+    if (text.isEmpty) continue;
+    return text.length <= 2 ? text : text.substring(0, 2);
+  }
+  return null;
+}
+
+List<SodaOption> _movementOptions(List<SodaOption> items) {
+  final options = <SodaOption>[];
+  final seen = <String>{};
+  for (final item in items) {
+    final code = _movementCode(item.code, name: item.name);
+    if (code == null || !seen.add(code)) continue;
+    final label = item.name.trim().isEmpty ? item.code : item.name.trim();
+    options.add(SodaOption(code: code, name: label, raw: item.raw));
+  }
+  return options;
 }
 
 List<SodaOption> _withSelected(List<SodaOption> items, String? value) {

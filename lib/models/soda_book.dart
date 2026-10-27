@@ -196,6 +196,9 @@ class SodaOption {
   }
 
   static String _code(Map<String, dynamic> json) {
+    // Parties / KeyValue lookups: key = PartyCode, value = PartyName.
+    final keyCode = sodaCode(sodaFieldLoose(json, 'key'));
+    if (keyCode != null && !_isFieldLabel(keyCode)) return keyCode;
     for (final key in const [
       'customerKey',
       'custKey',
@@ -209,7 +212,6 @@ class SodaOption {
       'statusCode',
       'code',
       'id',
-      'value',
     ]) {
       final text = sodaCode(sodaFieldLoose(json, key));
       if (text != null && !_isFieldLabel(text)) return text;
@@ -218,13 +220,11 @@ class SodaOption {
       final key = entry.key.toLowerCase().replaceAll('_', '');
       if (key.contains('name') ||
           key.contains('desc') ||
-          key.contains('title')) {
+          key.contains('title') ||
+          key == 'value') {
         continue;
       }
-      if (key.endsWith('code') ||
-          key.endsWith('id') ||
-          key.endsWith('key') ||
-          key == 'value') {
+      if (key.endsWith('code') || key.endsWith('id') || key.endsWith('key')) {
         final text = sodaCode(entry.value);
         if (text != null && !_isFieldLabel(text)) return text;
       }
@@ -244,6 +244,7 @@ class SodaOption {
       'description',
       'title',
       'text',
+      'value',
     ]) {
       final text = _displayText(sodaFieldLoose(json, key));
       if (text != null) return text;
@@ -265,7 +266,9 @@ class SodaOption {
       if (_skipDisplayKey(key) ||
           key.endsWith('key') ||
           key.endsWith('code') ||
-          key.endsWith('id')) {
+          key.endsWith('id') ||
+          key == 'disc' ||
+          key == 'commission') {
         continue;
       }
       final text = _displayText(entry.value);
@@ -378,8 +381,23 @@ String? sodaCode(dynamic value) {
 }
 
 int? sodaActCode(Map<String, dynamic> json) {
+  for (final key in const [
+    'accountCode',
+    'accCode',
+    'actCode',
+    'aCT_CODE',
+    'sacT_CODE',
+    'bacT_CODE',
+  ]) {
+    final parsed = int.tryParse(sodaCode(sodaFieldLoose(json, key)) ?? '');
+    if (parsed != null && parsed != 0) return parsed;
+  }
   for (final entry in json.entries) {
-    final key = entry.key.toLowerCase();
+    final key = entry.key.toLowerCase().replaceAll('_', '');
+    if (key == 'accountcode' || key == 'acccode') {
+      final parsed = int.tryParse(sodaCode(entry.value) ?? '');
+      if (parsed != null && parsed != 0) return parsed;
+    }
     if (!key.contains('act')) continue;
     if (!key.contains('code') && !key.endsWith('id')) continue;
     final parsed = int.tryParse(sodaCode(entry.value) ?? '');

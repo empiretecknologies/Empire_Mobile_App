@@ -422,7 +422,58 @@ class _BrandFooter extends StatelessWidget {
             _FooterItem(Icons.phone_outlined, '+92 33 3305034'),
           ],
         ),
+        SizedBox(height: 14),
+        PoweredByFooter(onBrandBackground: true),
       ],
+    );
+  }
+}
+
+/// Centered “Powered by” credit used on Login and Dashboard footers.
+class PoweredByFooter extends StatelessWidget {
+  const PoweredByFooter({super.key, this.onBrandBackground = false});
+
+  final bool onBrandBackground;
+
+  @override
+  Widget build(BuildContext context) {
+    final labelColor = onBrandBackground
+        ? AppColors.onForest.withValues(alpha: 0.78)
+        : AppTheme.secondaryText(context);
+    final brandColor = onBrandBackground
+        ? AppColors.limeSoft
+        : (AppTheme.isDark(context) ? AppColors.lime : AppColors.forest);
+
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: 'Powered by: ',
+              style: TextStyle(
+                color: labelColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.2,
+                height: 1.3,
+              ),
+            ),
+            TextSpan(
+              text: 'Empire Tecknologies',
+              style: TextStyle(
+                color: brandColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.25,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ),
+        textAlign: TextAlign.center,
+        maxLines: 1,
+      ),
     );
   }
 }

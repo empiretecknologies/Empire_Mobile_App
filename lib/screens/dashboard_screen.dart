@@ -8,6 +8,7 @@ import '../services/auth_service.dart';
 import '../services/dashboard_service.dart';
 import '../session/app_session.dart';
 import '../theme/app_theme.dart';
+import '../widgets/branded_shell.dart';
 import '../widgets/page_header.dart';
 import 'city_outstanding_screen.dart';
 import 'login_screen.dart';
@@ -263,6 +264,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   onCity: _openCity,
                 ),
               ],
+              const SizedBox(height: 28),
+              const PoweredByFooter(),
             ],
           ),
         ),
