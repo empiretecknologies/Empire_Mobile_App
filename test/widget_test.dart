@@ -71,10 +71,26 @@ void main() {
       ),
     );
 
-    expect(find.text('MQT Dashboard'), findsOneWidget);
+    expect(find.text('Dashboard'), findsOneWidget);
     expect(find.text('Welcome, empire'), findsOneWidget);
-    expect(find.text('Soda Book Feeding'), findsOneWidget);
-    expect(find.text('12'), findsOneWidget);
+    expect(find.text('Over All Available Funds'), findsOneWidget);
+    expect(find.text('Net Receivable & Payable'), findsOneWidget);
+    final dashboardScroll = find.descendant(
+      of: find.byType(RefreshIndicator),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.text('Total Sales'),
+      400,
+      scrollable: dashboardScroll,
+    );
+    expect(find.text('Total Sales'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Party Receivables & Payables'),
+      400,
+      scrollable: dashboardScroll,
+    );
+    expect(find.text('Party Receivables & Payables'), findsOneWidget);
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Search'), findsOneWidget);
     expect(find.text("FAQ's"), findsOneWidget);
@@ -191,6 +207,47 @@ void main() {
     expect(cities.single.accountName, 'Karachi');
     expect(cities.single.balance, 2500);
     expect(formatDashboardNumber(cities.single.balance), '2,500');
+    expect(formatDashboardRs(-266927188), 'Rs. (266,927,188)');
+
+    final kpi = DashboardKpi.from({'value': 2033});
+    expect(kpi.value, 2033);
+
+    final sales = DashboardChartSeries.from({
+      'points': [
+        {'label': '15 Oct', 'value': 500000000, 'trend': 510000000},
+      ],
+    });
+    expect(sales.points.single.label, '15 Oct');
+    expect(sales.points.single.trend, 510000000);
+
+    final category = DashboardChartSeries.from({
+      'total': 12113842,
+      'items': [
+        {
+          'label': 'Y.P CHILKA',
+          'value': 23,
+          'trend': 2786183,
+          'color': '#0E6B38',
+        },
+      ],
+    });
+    expect(category.total, 12113842);
+    expect(category.points.single.sliceValue, 2786183);
+
+    final parties = DashboardGrid.from({
+      'columns': ['Party Name', 'Outstanding', 'Due Status'],
+      'rows': [
+        ['TAJ TRADERS FSD', 414411, 'OVERDUE'],
+      ],
+    });
+    expect(
+      parties.cell(parties.records.single, const ['party name']),
+      'TAJ TRADERS FSD',
+    );
+    expect(
+      parties.cell(parties.records.single, const ['due status']),
+      'OVERDUE',
+    );
 
     final rows = DashboardSummary.rowsFrom({
       'data': [
