@@ -66,6 +66,232 @@ class DashboardService {
     return DashboardSummary.rowsFrom(response.data);
   }
 
+  Future<DashboardKpi> getAvailableFunds({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardAvailableFunds,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> getNetReceivablePayable({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardNetReceivablePayable,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> getPendingOrdersCount({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardPendingOrders,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> getTotalDelivery({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardTotalDelivery,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> getCashBankFlowIn({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardCashBankFlowIn,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> getCashBankFlowOut({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getKpi(
+      ApiConfig.dashboardCashBankFlowOut,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardChartSeries> getTotalSales({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getChart(
+      ApiConfig.dashboardTotalSales,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardChartSeries> getSalesByCategory({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getChart(
+      ApiConfig.dashboardSalesByCategory,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardChartSeries> getDailyReceived({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getChart(
+      ApiConfig.dashboardDailyReceived,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardGrid> getPartyReceivablesPayables({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getGrid(
+      ApiConfig.dashboardPartyReceivablesPayables,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardGrid> getPendingSaleOrders({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getGrid(
+      ApiConfig.dashboardPendingSaleOrders,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardGrid> getStockMovement({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return _getGrid(
+      ApiConfig.dashboardStockMovement,
+      duration: duration,
+      fromDate: fromDate,
+      toDate: toDate,
+    );
+  }
+
+  Future<DashboardKpi> _getKpi(
+    String path, {
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) async {
+    final response = await _client.get(
+      path,
+      query: _dashboardQuery(
+        duration: duration,
+        fromDate: fromDate,
+        toDate: toDate,
+      ),
+    );
+    return DashboardKpi.from(response.data);
+  }
+
+  Future<DashboardChartSeries> _getChart(
+    String path, {
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) async {
+    final response = await _client.get(
+      path,
+      query: _dashboardQuery(
+        duration: duration,
+        fromDate: fromDate,
+        toDate: toDate,
+      ),
+    );
+    return DashboardChartSeries.from(response.data);
+  }
+
+  Future<DashboardGrid> _getGrid(
+    String path, {
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) async {
+    final response = await _client.get(
+      path,
+      query: _dashboardQuery(
+        duration: duration,
+        fromDate: fromDate,
+        toDate: toDate,
+      ),
+    );
+    return DashboardGrid.from(response.data);
+  }
+
+  Map<String, String> _dashboardQuery({
+    required String duration,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) {
+    return {
+      ..._sessionQuery(),
+      'duration': duration,
+      'fromDate': _isoDate(fromDate),
+      'toDate': _isoDate(toDate),
+    };
+  }
+
+  String _isoDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
   Map<String, String> _sessionQuery() {
     final session = AppSession.instance;
     final company = session.ccode;

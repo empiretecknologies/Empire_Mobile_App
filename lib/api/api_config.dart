@@ -14,6 +14,24 @@ class ApiConfig {
   static const String mobileDashboardOutstanding =
       '/api/MobileDashboard/Outstanding';
   static const String mobileCityOutstanding = '/api/MobileCityOutstanding';
+  static const String dashboard = '/api/Dashboard';
+  static const String dashboardAvailableFunds = '/api/Dashboard/AvailableFunds';
+  static const String dashboardNetReceivablePayable =
+      '/api/Dashboard/NetReceivablePayable';
+  static const String dashboardPendingOrders = '/api/Dashboard/PendingOrders';
+  static const String dashboardTotalDelivery = '/api/Dashboard/TotalDelivery';
+  static const String dashboardCashBankFlowIn = '/api/Dashboard/CashBankFlowIn';
+  static const String dashboardCashBankFlowOut =
+      '/api/Dashboard/CashBankFlowOut';
+  static const String dashboardTotalSales = '/api/Dashboard/TotalSales';
+  static const String dashboardSalesByCategory =
+      '/api/Dashboard/SalesByCategory';
+  static const String dashboardDailyReceived = '/api/Dashboard/DailyReceived';
+  static const String dashboardPartyReceivablesPayables =
+      '/api/Dashboard/PartyReceivablesPayables';
+  static const String dashboardPendingSaleOrders =
+      '/api/Dashboard/PendingSaleOrders';
+  static const String dashboardStockMovement = '/api/Dashboard/StockMovement';
   static const String sodaBookFeeding = '/api/SodaBookFeeding';
   static const String sodaBookFeedingQuickSearch =
       '/api/SodaBookFeeding/QuickSearch';
