@@ -234,6 +234,7 @@ class SodaOption {
 
   static String _name(Map<String, dynamic> json) {
     for (final key in const [
+      'value',
       'customerName',
       'custName',
       'partyName',
@@ -244,7 +245,6 @@ class SodaOption {
       'description',
       'title',
       'text',
-      'value',
     ]) {
       final text = _displayText(sodaFieldLoose(json, key));
       if (text != null) return text;
@@ -286,7 +286,12 @@ class SodaOption {
 
   static bool _isFieldLabel(String text) {
     final compact = text.toLowerCase().replaceAll('_', '').replaceAll(' ', '');
-    return compact == 'customerkey' || compact == 'customername';
+    return compact == 'customerkey' ||
+        compact == 'customername' ||
+        compact == 'customizedkey' ||
+        compact == 'customkey' ||
+        compact == 'key' ||
+        compact == 'value';
   }
 
   static bool _skipDisplayKey(String key) {

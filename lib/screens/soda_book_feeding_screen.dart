@@ -1,8 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/api_client.dart';
+import '../api/api_config.dart';
 import '../models/soda_book.dart';
 import '../services/soda_book_service.dart';
 import '../session/app_session.dart';
@@ -42,7 +45,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
   DateTime? _voucherDate;
   DateTime? _dueDate;
   DateTime? _shipDate;
-  String? _type;
+  String? _type = 'LOC';
   String? _sodaType;
   String? _seller;
   String? _buyer;
@@ -58,10 +61,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
   bool _loadingVoucher = false;
   bool _saving = false;
   bool _leaving = false;
-  int _page = 0;
-  StateSetter? _lineSheetSetter;
   int _loadToken = 0;
   BuildContext? _themeContext;
+  final _formScroll = ScrollController();
+  final _itemsScroll = ScrollController();
+  final _remarksFocus = FocusNode();
+  final _commentKey = GlobalKey();
 
   BuildContext get _theme => _themeContext ?? context;
 
@@ -69,7 +74,8 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
   void initState() {
     super.initState();
     _voucherDate = DateTime.now();
-    _lines.add(_DetailLine()..unitCode = _unit);
+    _seedBlankLines();
+    _remarksFocus.addListener(_onRemarksFocus);
     if (AppSession.instance.isLoggedIn) {
       _lookupsLoading = true;
       unawaited(_loadLookups());
@@ -83,6 +89,10 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _remarks.dispose();
     _creditDays.dispose();
     _rate.dispose();
+    _formScroll.dispose();
+    _itemsScroll.dispose();
+    _remarksFocus.removeListener(_onRemarksFocus);
+    _remarksFocus.dispose();
     for (final line in _lines) {
       line.dispose();
     }
@@ -204,9 +214,15 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _shipDate = _dateFrom(sodaFieldLoose(_master, 'shiP_DATE'));
     _type = _sbfTypeCode(sodaCode(sodaFieldLoose(_master, 'sbF_TYPE')));
     _sodaType = sodaCode(sodaFieldLoose(_master, 'sodA_TYPE'));
-    _seller = sodaCode(sodaFieldLoose(_master, 'selleR_CODE'));
-    _buyer = sodaCode(sodaFieldLoose(_master, 'buyeR_CODE'));
-    _broker = sodaCode(sodaFieldLoose(_master, 'brokeR_CODE'));
+    _seller = _find(_parties, sodaCode(sodaFieldLoose(_master, 'selleR_CODE')))
+            ?.code ??
+        sodaCode(sodaFieldLoose(_master, 'selleR_CODE'));
+    _buyer = _find(_parties, sodaCode(sodaFieldLoose(_master, 'buyeR_CODE')))
+            ?.code ??
+        sodaCode(sodaFieldLoose(_master, 'buyeR_CODE'));
+    _broker = _find(_parties, sodaCode(sodaFieldLoose(_master, 'brokeR_CODE')))
+            ?.code ??
+        sodaCode(sodaFieldLoose(_master, 'brokeR_CODE'));
     _condition = sodaCode(sodaFieldLoose(_master, 'cond'));
     _currency = sodaCode(sodaFieldLoose(_master, 'curR_CODE'));
     _unit = sodaCode(sodaFieldLoose(_master, 'unit'));
@@ -217,7 +233,13 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     for (final row in document.detail) {
       _lines.add(_lineFrom(row));
     }
-    if (_lines.isEmpty) _lines.add(_DetailLine()..unitCode = _unit);
+    _seedBlankLines();
+  }
+
+  void _seedBlankLines({int count = 1}) {
+    while (_lines.length < count) {
+      _lines.insert(0, _DetailLine()..unitCode = _unit);
+    }
   }
 
   _DetailLine _lineFrom(Map<String, dynamic> row) {
@@ -249,7 +271,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _voucherDate = DateTime.now();
     _dueDate = null;
     _shipDate = null;
-    _type = null;
+    _type = 'LOC';
     _sodaType = null;
     _seller = null;
     _buyer = null;
@@ -259,7 +281,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _unit = null;
     _status = null;
     _movement = null;
-    _lines.add(_DetailLine());
+    _seedBlankLines();
     setState(() {});
   }
 
@@ -269,16 +291,21 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     _dueDate = _voucherDate!.add(Duration(days: days));
   }
 
-  void _syncDueDate() {
-    setState(_applyCreditDueDate);
-  }
-
   void _recalc(_DetailLine line) {
     final qty = _readNum(line.qty.text);
     final rate = _readNum(line.rate.text);
-    if (qty == null || rate == null) return;
+    if (qty == null || rate == null) {
+      if (line.amount.text.isNotEmpty) {
+        line.amount.text = '';
+        setState(() {});
+      }
+      return;
+    }
     final text = _numberText(qty * rate);
-    if (line.amount.text != text) line.amount.text = text;
+    if (line.amount.text != text) {
+      line.amount.text = text;
+      setState(() {});
+    }
   }
 
   Future<void> _save() async {
@@ -287,12 +314,22 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       _message('Voucher date is required.');
       return;
     }
+    final master = _masterPayload();
+    final detail = _detailPayload();
+    if (detail.isEmpty) {
+      _message('Add at least one item before saving.');
+      return;
+    }
+    debugPrint(
+      'SodaBookFeeding ${ _tranId != null ? 'PUT' : 'POST' } '
+      '${ApiConfig.sodaBookFeeding} body=${jsonEncode({'master': master, 'detail': detail})}',
+    );
     setState(() => _saving = true);
     try {
       final update = _tranId != null;
       final data = await _service.save(
-        master: _masterPayload(),
-        detail: _detailPayload(),
+        master: master,
+        detail: detail,
         update: update,
       );
       if (!mounted) return;
@@ -350,14 +387,14 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     sodaSetField(master, 'remarks', _blank(_remarks.text));
     sodaSetField(master, 'bcode', session.bcode);
     sodaSetField(master, 'perioD_ID', session.pid);
-    return master;
+    return _allowedMap(master, _masterFields);
   }
 
   List<Map<String, dynamic>> _detailPayload() {
     final session = AppSession.instance;
     final rows = <Map<String, dynamic>>[];
     for (final line in _lines) {
-      if (_lineIsEmpty(line)) continue;
+      if (line.itemCode == null || line.itemCode!.isEmpty) continue;
       final row = Map<String, dynamic>.from(line.raw);
       sodaSetField(row, 'traN_ID', _tranId);
       sodaSetField(row, 'iteM_CODE', _apiInt(line.itemCode));
@@ -372,7 +409,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       sodaSetField(row, 'chk', line.checked ? 1 : 0);
       sodaSetField(row, 'bcode', session.bcode);
       sodaSetField(row, 'perioD_ID', session.pid);
-      rows.add(row);
+      rows.add(_allowedMap(row, _detailFields));
     }
     return rows;
   }
@@ -451,21 +488,23 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       final name = _find(_items, code)?.name;
       if (name != null && name.isNotEmpty) line.desc.text = name;
     }
-    _lineSheetSetter?.call(() {});
   }
 
   void _addLine() {
-    final line = _DetailLine()..unitCode = _unit;
-    setState(() => _lines.add(line));
-    _editLine(_lines.length - 1);
+    setState(() {
+      _lines.insert(0, _DetailLine()..unitCode = _unit);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_itemsScroll.hasClients) {
+        _itemsScroll.jumpTo(0);
+      }
+    });
   }
 
   void _removeLine(int index) {
     if (index < 0 || index >= _lines.length) return;
     final removed = _lines.removeAt(index);
-    setState(() {
-      if (_lines.isEmpty) _lines.add(_DetailLine()..unitCode = _unit);
-    });
+    setState(_seedBlankLines);
     WidgetsBinding.instance.addPostFrameCallback((_) => removed.dispose());
   }
 
@@ -478,8 +517,10 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       child: Builder(
         builder: (context) {
           _themeContext = context;
+          final keyboard = MediaQuery.viewInsetsOf(context).bottom;
           return Scaffold(
             backgroundColor: AppTheme.pageBackground(context),
+            resizeToAvoidBottomInset: false,
             appBar: AppBar(
               backgroundColor: AppColors.forestDeep,
               foregroundColor: AppColors.onForest,
@@ -508,26 +549,36 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                     backgroundColor: AppColors.forestMid,
                   ),
                 Expanded(
-                  child: Column(
-                    children: [
-                      Padding(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return SingleChildScrollView(
+                        controller: _formScroll,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
                         padding: EdgeInsets.fromLTRB(
                           horizontal,
                           12,
                           horizontal,
                           12,
                         ),
-                        child: _sectionSwitch(context),
-                      ),
-                      Expanded(
-                        child: _page == 0
-                            ? _masterPage(context, horizontal)
-                            : _detailPage(context, busy, horizontal),
-                      ),
-                    ],
+                        child: Column(
+                          children: [
+                            _masterCard(context, busy),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              height: _itemsViewportHeight(
+                                constraints.maxHeight,
+                              ),
+                              child: _itemsCard(context, busy),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
-                _actions(context, busy, horizontal),
+                if (keyboard == 0) _actions(context, busy, horizontal),
+                SizedBox(height: keyboard),
               ],
             ),
           );
@@ -536,180 +587,301 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     );
   }
 
-  Widget _masterPage(BuildContext context, double horizontal) {
-    return ListView(
-      padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 20),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      children: [
-        _panel(context, 'Master', [
-          _pair(
-            _dateField(
-              'Transaction Date',
-              _voucherDate,
-              (value) => setState(() {
-                _voucherDate = value;
-                _applyCreditDueDate();
-              }),
-            ),
-            _text('Transaction #', _voucherNo),
-          ),
-          _pair(
-            _lookup('Type', _type, _types, (value) {
-              setState(() => _type = _sbfTypeCode(value));
-            }),
-            _lookup('Soda Type', _sodaType, _sodaTypes, (value) {
-              setState(() => _sodaType = value);
-            }),
-          ),
-          _pair(
-            _lookup('Seller', _seller, _parties, _onSeller),
-            _lookup('Buyer', _buyer, _parties, _onBuyer),
-          ),
-          _pair(
-            _lookup('Broker', _broker, _parties, (value) {
-              setState(() => _broker = value);
-            }),
-            _lookup('Condition', _condition, _conditions, (value) {
-              setState(() => _condition = value);
-            }),
-          ),
-          _pair(
-            _lookup('Currency', _currency, _currencies, (value) {
-              setState(() => _currency = value);
-            }),
-            _text('Rate', _rate, number: true),
-          ),
-          _pair(
-            _lookup('Unit', _unit, _units, (value) {
-              setState(() => _unit = value);
-            }),
-            _text(
-              'Credit Days',
-              _creditDays,
-              number: true,
-              onChanged: (_) => _syncDueDate(),
-            ),
-          ),
-          _pair(
-            _dateField(
-              'Due Date',
-              _dueDate,
-              (value) => setState(() => _dueDate = value),
-            ),
-            _dateField(
-              'Ship Date',
-              _shipDate,
-              (value) => setState(() => _shipDate = value),
-            ),
-          ),
-          _pair(
-            _lookup('Status', _status, _statuses, (value) {
-              setState(() => _status = value);
-            }),
-            _lookup('Movement', _movement, _movements, (value) {
-              setState(() => _movement = _movementCode(value));
-            }),
-          ),
-          _text('Reference #', _ref),
-          _text('Remarks', _remarks, lines: 3),
-        ]),
-      ],
-    );
+  double _itemsViewportHeight(double available) {
+    const twoRows = 540.0;
+    const minRows = 220.0;
+    if (available <= 0) return twoRows;
+    final upper = available < minRows ? minRows : available;
+    return twoRows.clamp(minRows, upper);
   }
 
-  Widget _sectionSwitch(BuildContext context) {
-    return Container(
-      height: 42,
-      decoration: BoxDecoration(
-        color: AppTheme.cardColor(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.dividerColor(context)),
-      ),
-      child: Row(
+  void _onRemarksFocus() {
+    if (_remarksFocus.hasFocus) {
+      _revealField(_commentKey.currentContext ?? context, alignment: 0.12);
+    }
+  }
+
+  void _revealField(BuildContext fieldContext, {double alignment = 0.12}) {
+    Future<void>.delayed(const Duration(milliseconds: 280), () {
+      if (!fieldContext.mounted) return;
+      Scrollable.ensureVisible(
+        fieldContext,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOut,
+        alignment: alignment,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
+      );
+    });
+  }
+
+  Widget _masterCard(BuildContext context, bool busy) {
+    final voucher = _voucherNo.text.trim();
+    return _shellCard(
+      context,
+      child: Column(
         children: [
-          _sectionTab(context, 'Master', 0),
-          _sectionTab(context, 'Detail (${_lines.length})', 1),
+          _cardHeader(
+            context,
+            icon: Icons.description_outlined,
+            title: 'Invoice No.',
+            value: voucher.isEmpty ? 'New voucher' : voucher,
+            trailing: _statusChip(context),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              children: [
+                _pair(
+                  _dateTile(
+                    context,
+                    label: 'Transaction Date',
+                    value: _voucherDate,
+                    enabled: !busy,
+                    compact: true,
+                    onPick: (value) => setState(() {
+                      _voucherDate = value;
+                      _applyCreditDueDate();
+                    }),
+                  ),
+                  _lookupTile(
+                    context,
+                    label: 'Movement',
+                    value: _movement,
+                    options: _movements,
+                    icon: Icons.swap_horiz_rounded,
+                    enabled: !busy,
+                    compact: true,
+                    onChanged: (value) => setState(
+                      () => _movement = _movementCode(value),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _lookupTile(
+                  context,
+                  label: 'Seller Code',
+                  value: _seller,
+                  options: _parties,
+                  icon: Icons.person_outline_rounded,
+                  hint: 'Select Seller',
+                  enabled: !busy,
+                  onChanged: _onSeller,
+                ),
+                const SizedBox(height: 8),
+                _lookupTile(
+                  context,
+                  label: 'Buyer Code',
+                  value: _buyer,
+                  options: _parties,
+                  icon: Icons.storefront_outlined,
+                  hint: 'Select Buyer',
+                  enabled: !busy,
+                  onChanged: _onBuyer,
+                ),
+                const SizedBox(height: 8),
+                _lookupTile(
+                  context,
+                  label: 'Type',
+                  value: _type,
+                  options: _types,
+                  icon: Icons.category_outlined,
+                  enabled: !busy,
+                  onChanged: (value) => setState(
+                    () => _type = _sbfTypeCode(value),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _commentField(context, busy),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _sectionTab(BuildContext context, String label, int page) {
-    final selected = _page == page;
-    final accent = AppTheme.isDark(context)
-        ? AppColors.lime
-        : AppColors.onForest;
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(3),
-        child: Material(
-          color: selected ? AppColors.forest : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(6),
-            onTap: () => setState(() => _page = page),
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: selected ? accent : AppTheme.primaryText(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+  Widget _itemsCard(BuildContext context, bool busy) {
+    return _shellCard(
+      context,
+      child: Column(
+        children: [
+          _cardHeader(
+            context,
+            icon: Icons.shopping_cart_outlined,
+            title: 'Invoice Items',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _countChip(context, '${_lines.length} Items'),
+                IconButton(
+                  tooltip: 'Add item',
+                  onPressed: busy ? null : _addLine,
+                  icon: Icon(
+                    Icons.add_circle_outline,
+                    color: AppTheme.isDark(context)
+                        ? AppColors.lime
+                        : AppColors.forestDeep,
+                  ),
                 ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: ListView.separated(
+                controller: _itemsScroll,
+                itemCount: _lines.length,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                physics: const ClampingScrollPhysics(),
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) =>
+                    _itemCard(context, index, busy),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _detailPage(BuildContext context, bool busy, double horizontal) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(horizontal, 0, horizontal, 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppTheme.cardColor(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.dividerColor(context)),
-        ),
+  Widget _itemCard(BuildContext context, int index, bool busy) {
+    final line = _lines[index];
+    final amount = line.amount.text.trim();
+    final accent = AppTheme.isDark(context)
+        ? AppColors.lime
+        : AppColors.forestDeep;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.isDark(context)
+            ? const Color(0xFF161E1B)
+            : const Color(0xFFF4F8F4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.dividerColor(context)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-              child: Row(
-                children: [
-                  Container(
-                    width: 3,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: AppTheme.isDark(context)
-                          ? AppColors.lime
-                          : AppColors.forestDeep,
-                      borderRadius: BorderRadius.circular(2),
+            Row(
+              children: [
+                Container(
+                  width: 26,
+                  height: 26,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: accent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${index + 1}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(child: _section('Detail')),
-                  TextButton.icon(
-                    onPressed: busy ? null : _addLine,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add line'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.isDark(context)
-                          ? AppColors.lime
-                          : AppColors.forestDeep,
-                      visualDensity: VisualDensity.compact,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Item #${(index + 1).toString().padLeft(2, '0')}',
+                    style: TextStyle(
+                      color: AppTheme.primaryText(context),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'Amount',
+                      style: TextStyle(
+                        color: AppTheme.secondaryText(context),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      amount.isEmpty ? '0' : amount,
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  tooltip: 'Remove item',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: busy ? null : () => _removeLine(index),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: Colors.red.shade400,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _lookupTile(
+              context,
+              label: 'Item',
+              value: line.itemCode,
+              options: _items,
+              icon: Icons.inventory_2_outlined,
+              hint: 'Select Product',
+              enabled: !busy,
+              onChanged: (value) => _onItem(line, value),
+            ),
+            const SizedBox(height: 8),
+            _pair(
+              _numberTile(
+                context,
+                label: 'Quantity',
+                controller: line.qty,
+                icon: Icons.inventory_outlined,
+                enabled: !busy,
+                compact: true,
+                onChanged: (_) => _recalc(line),
+              ),
+              _numberTile(
+                context,
+                label: 'Rate',
+                controller: line.rate,
+                icon: Icons.payments_outlined,
+                enabled: !busy,
+                compact: true,
+                onChanged: (_) => _recalc(line),
               ),
             ),
-            Divider(height: 1, color: AppTheme.dividerColor(context)),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _lines.length,
-                itemBuilder: (context, index) => _detailRow(context, index),
+            const SizedBox(height: 8),
+            _pair(
+              _lookupTile(
+                context,
+                label: 'Unit',
+                value: line.unitCode,
+                options: _units,
+                icon: Icons.straighten_outlined,
+                hint: 'Select Unit',
+                enabled: !busy,
+                compact: true,
+                onChanged: (value) => setState(() => line.unitCode = value),
+              ),
+              _lookupTile(
+                context,
+                label: 'RT Type',
+                value: line.rtType,
+                options: _rtTypes,
+                icon: Icons.tune_outlined,
+                hint: 'Select RT Type',
+                enabled: !busy,
+                compact: true,
+                onChanged: (value) => setState(() => line.rtType = value),
               ),
             ),
           ],
@@ -718,262 +890,397 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     );
   }
 
-  Widget _detailRow(BuildContext context, int index) {
-    final line = _lines[index];
-    final title = _lineTitle(line, index);
-    final meta = _lineMeta(line);
-    final amount = line.amount.text.trim();
+  Widget _shellCard(BuildContext context, {required Widget child}) {
+    final dark = AppTheme.isDark(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.cardColor(context),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.dividerColor(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.22 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(21),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _cardHeader(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    String? value,
+    Widget? trailing,
+  }) {
     final accent = AppTheme.isDark(context)
         ? AppColors.lime
         : AppColors.forestDeep;
-    return InkWell(
-      onTap: () => _editLine(index),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: AppTheme.dividerColor(context)),
-          ),
-          color: index.isOdd ? AppTheme.zebraColor(context) : null,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: AppColors.forest.withValues(
+          alpha: AppTheme.isDark(context) ? 0.28 : 0.08,
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 28,
-                child: Text(
-                  '${index + 1}',
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(21)),
+      ),
+      child: Row(
+        children: [
+          _iconBox(context, icon),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
                   style: TextStyle(
                     color: AppTheme.secondaryText(context),
                     fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.primaryText(context),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
+                if (value != null)
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      meta,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppTheme.secondaryText(context),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                amount.isEmpty ? '-' : amount,
-                style: TextStyle(
-                  color: amount.isEmpty
-                      ? AppTheme.secondaryText(context)
-                      : accent,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              IconButton(
-                tooltip: 'Remove line',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _removeLine(index),
-                icon: Icon(
-                  Icons.close,
-                  size: 18,
-                  color: AppTheme.secondaryText(context),
-                ),
-              ),
-            ],
+                  ),
+              ],
+            ),
           ),
+          if (trailing != null) trailing,
+        ],
+      ),
+    );
+  }
+
+  Widget _statusChip(BuildContext context) {
+    final isNew = _tranId == null;
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.forest.withValues(alpha: isNew ? 0.12 : 0.18),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: isNew ? AppColors.forestMid : AppColors.forestDeep,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            isNew ? 'New' : 'Saved',
+            style: TextStyle(
+              color: AppTheme.isDark(context)
+                  ? AppColors.lime
+                  : AppColors.forestDeep,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _countChip(BuildContext context, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.forest.withValues(
+          alpha: AppTheme.isDark(context) ? 0.28 : 0.12,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: AppTheme.isDark(context)
+              ? AppColors.lime
+              : AppColors.forestDeep,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
   }
 
-  String _lineTitle(_DetailLine line, int index) {
-    final item = _find(_items, line.itemCode)?.name;
-    if (item != null && item.isNotEmpty) return item;
-    final desc = line.desc.text.trim();
-    if (desc.isNotEmpty) return desc;
-    return 'Line ${index + 1}';
-  }
-
-  String _lineMeta(_DetailLine line) {
-    final qty = line.qty.text.trim();
-    final unit = _find(_units, line.unitCode)?.name ?? line.unitCode ?? '';
-    final rate = line.rate.text.trim();
-    final parts = <String>[
-      if (qty.isNotEmpty) 'Qty $qty${unit.isEmpty ? '' : ' $unit'}',
-      if (rate.isNotEmpty) 'Rate $rate',
-      if (line.checked) 'Checked',
-    ];
-    if (parts.isEmpty) return 'Tap to enter this detail line';
-    return parts.join('  ·  ');
-  }
-
-  Future<void> _editLine(int index) async {
-    if (index < 0 || index >= _lines.length) return;
-    await showModalBottomSheet<void>(
-      context: _theme,
-      isScrollControlled: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheet) {
-            _lineSheetSetter = setSheet;
-            if (index >= _lines.length) return const SizedBox.shrink();
-            return _lineEditor(context, index);
-          },
-        );
-      },
-    );
-    _lineSheetSetter = null;
-    if (mounted) setState(() {});
-  }
-
-  Widget _lineEditor(BuildContext context, int index) {
-    final line = _lines[index];
-    final media = MediaQuery.of(context);
-    final height = (media.size.height * 0.92 - media.viewInsets.bottom).clamp(
-      280.0,
-      media.size.height * 0.92,
-    );
-    return Padding(
-      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-      child: SafeArea(
-        child: SizedBox(
-          height: height,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _section('Detail'),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Line ${index + 1}',
-                            style: TextStyle(
-                              color: AppTheme.primaryText(context),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              ),
-              Divider(height: 1, color: AppTheme.dividerColor(context)),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  children: [
-                    _lookup(
-                      'Item',
-                      line.itemCode,
-                      _items,
-                      (value) => _onItem(line, value),
-                      tag: 'item$index',
-                    ),
-                    const SizedBox(height: 12),
-                    _text('Description', line.desc),
-                    const SizedBox(height: 12),
-                    _pair(
-                      _text(
-                        'Qty',
-                        line.qty,
-                        number: true,
-                        onChanged: (_) => _recalc(line),
-                      ),
-                      _lookup('Unit', line.unitCode, _units, (value) {
-                        setState(() => line.unitCode = value);
-                        _lineSheetSetter?.call(() {});
-                      }, tag: 'unit$index'),
-                    ),
-                    const SizedBox(height: 12),
-                    _pair(
-                      _text('Qty 2', line.qty2, number: true),
-                      _text(
-                        'Rate',
-                        line.rate,
-                        number: true,
-                        onChanged: (_) => _recalc(line),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _text(
-                      'Amount',
-                      line.amount,
-                      number: true,
-                      readOnly: true,
-                      emphasize: true,
-                    ),
-                    const SizedBox(height: 12),
-                    _pair(
-                      _lookup('RT Type', line.rtType, _rtTypes, (value) {
-                        setState(() => line.rtType = value);
-                        _lineSheetSetter?.call(() {});
-                      }, tag: 'rt$index'),
-                      _dateField('Due Date', line.dueDate, (value) {
-                        setState(() => line.dueDate = value);
-                        _lineSheetSetter?.call(() {});
-                      }),
-                    ),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      visualDensity: VisualDensity.compact,
-                      value: line.checked,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(
-                        'Check',
-                        style: TextStyle(
-                          color: AppTheme.primaryText(context),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      onChanged: (value) {
-                        setState(() => line.checked = value ?? false);
-                        _lineSheetSetter?.call(() {});
-                      },
-                    ),
-                    if (line.balance.isNotEmpty)
-                      _balanceChip(context, line.balance),
-                  ],
-                ),
-              ),
-            ],
-          ),
+  Widget _iconBox(BuildContext context, IconData icon, {bool compact = false}) {
+    final size = compact ? 28.0 : 34.0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.forest.withValues(
+          alpha: AppTheme.isDark(context) ? 0.35 : 0.12,
         ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(
+        icon,
+        size: compact ? 16 : 18,
+        color: AppTheme.isDark(context) ? AppColors.lime : AppColors.forestDeep,
+      ),
+    );
+  }
+
+  Widget _commentField(BuildContext context, bool busy) {
+    return _inputFrame(
+      context,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: _iconBox(context, Icons.chat_bubble_outline),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Comment',
+                  style: TextStyle(
+                    color: AppTheme.secondaryText(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                TextField(
+                  key: _commentKey,
+                  controller: _remarks,
+                  focusNode: _remarksFocus,
+                  enabled: !busy,
+                  maxLines: 1,
+                  scrollPadding: const EdgeInsets.fromLTRB(20, 80, 20, 180),
+                  onTap: () => _revealField(
+                    _commentKey.currentContext ?? context,
+                    alignment: 0.12,
+                  ),
+                  style: TextStyle(
+                    color: AppTheme.primaryText(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Enter remarks...',
+                    hintStyle: TextStyle(
+                      color: AppTheme.secondaryText(context),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: const EdgeInsets.only(top: 2, bottom: 2),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dateTile(
+    BuildContext context, {
+    required String label,
+    required DateTime? value,
+    required ValueChanged<DateTime> onPick,
+    bool enabled = true,
+    bool compact = false,
+  }) {
+    return _inputFrame(
+      context,
+      compact: compact,
+      onTap: enabled
+          ? () async {
+              final picked = await showDatePicker(
+                context: _theme,
+                initialDate: value ?? DateTime.now(),
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+              );
+              if (picked == null) return;
+              onPick(DateTime(picked.year, picked.month, picked.day));
+            }
+          : null,
+      child: Row(
+        children: [
+          _iconBox(context, Icons.calendar_today_outlined, compact: compact),
+          SizedBox(width: compact ? 8 : 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.secondaryText(context),
+                    fontSize: compact ? 11 : 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value == null ? 'Select' : _dateLabel(value),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: value == null
+                        ? AppTheme.secondaryText(context)
+                        : AppTheme.primaryText(context),
+                    fontSize: compact ? 13 : 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _lookupTile(
+    BuildContext context, {
+    required String label,
+    required String? value,
+    required List<SodaOption> options,
+    required IconData icon,
+    required ValueChanged<String?> onChanged,
+    String hint = 'Select',
+    bool enabled = true,
+    bool compact = false,
+  }) {
+    return _AnchoredDropdown(
+      label: label,
+      value: value,
+      options: options,
+      icon: icon,
+      hint: hint,
+      enabled: enabled,
+      compact: compact,
+      onChanged: onChanged,
+      iconBox: _iconBox(context, icon, compact: compact),
+    );
+  }
+
+  Widget _numberTile(
+    BuildContext context, {
+    required String label,
+    required TextEditingController controller,
+    required IconData icon,
+    ValueChanged<String>? onChanged,
+    bool enabled = true,
+    bool compact = false,
+  }) {
+    return _inputFrame(
+      context,
+      compact: compact,
+      child: Row(
+        children: [
+          _iconBox(context, icon, compact: compact),
+          SizedBox(width: compact ? 8 : 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: AppTheme.secondaryText(context),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Builder(
+                  builder: (fieldContext) => TextField(
+                  controller: controller,
+                  enabled: enabled,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  scrollPadding: const EdgeInsets.fromLTRB(20, 80, 20, 180),
+                  onTap: () => _revealField(fieldContext, alignment: 0.12),
+                  onChanged: onChanged,
+                  style: TextStyle(
+                    color: AppTheme.primaryText(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.only(top: 2, bottom: 2),
+                  ),
+                ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _inputFrame(
+    BuildContext context, {
+    required Widget child,
+    VoidCallback? onTap,
+    bool compact = false,
+  }) {
+    final box = DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppTheme.isDark(context)
+            ? const Color(0xFF1B2420)
+            : AppColors.inputFill,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.dividerColor(context)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 10,
+          vertical: compact ? 8 : 10,
+        ),
+        child: child,
+      ),
+    );
+    if (onTap == null) return box;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: box,
       ),
     );
   }
@@ -990,310 +1297,56 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(horizontal, 12, horizontal, 12),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppButton(
-                        label: 'New',
-                        outlined: true,
-                        onPressed: busy ? null : _resetNew,
-                      ),
-                    ),
-                    if (_tranId != null) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: AppButton(
-                          label: 'Delete',
-                          outlined: true,
-                          onPressed: busy
-                              ? null
-                              : () {
-                                  _delete();
-                                },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 12),
-                AppButton(
-                  label: 'Save',
-                  icon: Icons.save_outlined,
-                  loading: _saving,
-                  onPressed: busy
-                      ? null
-                      : () {
-                          _save();
-                        },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _balanceChip(BuildContext context, String balance) {
-    final accent = AppTheme.isDark(context)
-        ? AppColors.lime
-        : AppColors.forestDeep;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.forest.withValues(
-          alpha: AppTheme.isDark(context) ? 0.28 : 0.08,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Text(
-            'Balance Qty',
-            style: TextStyle(
-              color: AppTheme.secondaryText(context),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            balance,
-            style: TextStyle(
-              color: accent,
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _panel(
-    BuildContext context,
-    String title,
-    List<Widget> fields, {
-    Widget? trailing,
-  }) {
-    final accent = AppTheme.isDark(context)
-        ? AppColors.lime
-        : AppColors.forestDeep;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppTheme.cardColor(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.dividerColor(context)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: AppTheme.isDark(context) ? 0.22 : 0.06,
-            ),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-            decoration: BoxDecoration(
-              color: AppColors.forest.withValues(
-                alpha: AppTheme.isDark(context) ? 0.28 : 0.08,
-              ),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(15),
-              ),
-            ),
+            padding: EdgeInsets.fromLTRB(horizontal, 10, horizontal, 10),
             child: Row(
               children: [
-                Container(
-                  width: 3,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: accent,
-                    borderRadius: BorderRadius.circular(2),
+                if (_tranId != null) ...[
+                  IconButton(
+                    tooltip: 'Delete',
+                    onPressed: busy
+                        ? null
+                        : () {
+                            _delete();
+                          },
+                    icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Expanded(
+                  child: AppButton(
+                    label: 'New',
+                    outlined: true,
+                    onPressed: busy ? null : _resetNew,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(child: _section(title, accent)),
-                ?trailing,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppButton(
+                    label: 'Save',
+                    icon: Icons.save_outlined,
+                    loading: _saving,
+                    onPressed: busy
+                        ? null
+                        : () {
+                            _save();
+                          },
+                  ),
+                ),
               ],
             ),
           ),
-          Padding(padding: const EdgeInsets.all(14), child: _fields(fields)),
-        ],
-      ),
-    );
-  }
-
-  Widget _section(String text, [Color? color]) {
-    return Text(
-      text.toUpperCase(),
-      style: TextStyle(
-        color: color ?? AppTheme.secondaryText(_theme),
-        fontSize: 12,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.1,
+        ),
       ),
     );
   }
 
   Widget _pair(Widget left, Widget right) {
-    final wide = MediaQuery.sizeOf(_theme).width >= 600;
-    if (!wide) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [left, const SizedBox(height: 14), right],
-      );
-    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(child: left),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         Expanded(child: right),
-      ],
-    );
-  }
-
-  Widget _fields(List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var i = 0; i < children.length; i++) ...[
-          if (i > 0) const SizedBox(height: 14),
-          children[i],
-        ],
-      ],
-    );
-  }
-
-  Widget _caption(String text) {
-    return Text(
-      text,
-      style: TextStyle(
-        color: AppTheme.secondaryText(_theme),
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        height: 1.2,
-      ),
-    );
-  }
-
-  Widget _text(
-    String label,
-    TextEditingController controller, {
-    bool number = false,
-    int lines = 1,
-    bool readOnly = false,
-    bool emphasize = false,
-    ValueChanged<String>? onChanged,
-  }) {
-    final accent = AppTheme.isDark(_theme)
-        ? AppColors.lime
-        : AppColors.forestDeep;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _caption(label),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          readOnly: readOnly,
-          maxLines: lines,
-          style: TextStyle(
-            color: emphasize ? accent : AppTheme.primaryText(_theme),
-            fontSize: 14,
-            fontWeight: emphasize ? FontWeight.w800 : FontWeight.w500,
-            height: 1.2,
-          ),
-          keyboardType: number
-              ? const TextInputType.numberWithOptions(decimal: true)
-              : TextInputType.text,
-          onChanged: onChanged,
-          decoration: _formDecoration(_theme, emphasize: emphasize),
-        ),
-      ],
-    );
-  }
-
-  Widget _lookup(
-    String label,
-    String? value,
-    List<SodaOption> items,
-    ValueChanged<String?> onChanged, {
-    Object? tag,
-  }) {
-    final options = _withSelected(items, value);
-    final selected = value != null && options.any((item) => item.code == value)
-        ? value
-        : null;
-    return _FieldDropdown(
-      key: ValueKey(tag ?? label),
-      label: label,
-      value: selected,
-      options: options,
-      onChanged: onChanged,
-    );
-  }
-
-  Widget _dateField(
-    String label,
-    DateTime? value,
-    ValueChanged<DateTime> onPick,
-  ) {
-    final hasValue = value != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _caption(label),
-        const SizedBox(height: 6),
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: _theme,
-                initialDate: value ?? DateTime.now(),
-                firstDate: DateTime(2000),
-                lastDate: DateTime(2100),
-              );
-              if (picked == null) return;
-              onPick(DateTime(picked.year, picked.month, picked.day));
-            },
-            child: InputDecorator(
-              decoration: _formDecoration(
-                _theme,
-                suffixIcon: Icon(
-                  Icons.calendar_today_outlined,
-                  size: 18,
-                  color: AppTheme.secondaryText(_theme),
-                ),
-              ),
-              child: Text(
-                hasValue ? _dateLabel(value) : 'Select',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: hasValue
-                      ? AppTheme.primaryText(_theme)
-                      : AppTheme.secondaryText(_theme),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  height: 1.2,
-                ),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -1324,6 +1377,239 @@ class _DetailLine {
   }
 }
 
+class _AnchoredDropdown extends StatelessWidget {
+  const _AnchoredDropdown({
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.icon,
+    required this.onChanged,
+    required this.iconBox,
+    this.hint = 'Select',
+    this.enabled = true,
+    this.compact = false,
+  });
+
+  final String label;
+  final String? value;
+  final List<SodaOption> options;
+  final IconData icon;
+  final ValueChanged<String?> onChanged;
+  final Widget iconBox;
+  final String hint;
+  final bool enabled;
+  final bool compact;
+
+  Future<void> _open(BuildContext context) async {
+    if (!enabled) return;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => _LookupSheet(
+        title: label,
+        options: options,
+        value: value,
+      ),
+    );
+    if (picked != null) onChanged(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _find(options, value);
+    final text =
+        selected?.name ??
+        (value == null || value!.isEmpty ? hint : value!);
+    final hasValue =
+        selected != null || (value != null && value!.isNotEmpty);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? () => _open(context) : null,
+        borderRadius: BorderRadius.circular(14),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppTheme.isDark(context)
+                ? const Color(0xFF1B2420)
+                : AppColors.inputFill,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppTheme.dividerColor(context)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 8 : 10,
+              vertical: compact ? 8 : 10,
+            ),
+            child: Row(
+              children: [
+                iconBox,
+                SizedBox(width: compact ? 8 : 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.secondaryText(context),
+                          fontSize: compact ? 11 : 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: hasValue
+                              ? AppTheme.primaryText(context)
+                              : AppTheme.secondaryText(context),
+                          fontSize: compact ? 13 : 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: AppTheme.secondaryText(context),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LookupSheet extends StatefulWidget {
+  const _LookupSheet({
+    required this.title,
+    required this.options,
+    required this.value,
+  });
+
+  final String title;
+  final List<SodaOption> options;
+  final String? value;
+
+  @override
+  State<_LookupSheet> createState() => _LookupSheetState();
+}
+
+class _LookupSheetState extends State<_LookupSheet> {
+  final _search = TextEditingController();
+  String _filter = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<SodaOption> _visible() {
+    final query = _filter.trim().toLowerCase();
+    if (query.isEmpty) return widget.options;
+    return [
+      for (final item in widget.options)
+        if (item.name.toLowerCase().contains(query) ||
+            item.code.toLowerCase().contains(query) ||
+            (sodaCode(sodaFieldLoose(item.raw, 'customizedKey')) ?? '')
+                .toLowerCase()
+                .contains(query))
+          item,
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final height = (media.size.height * 0.62).clamp(280.0, 520.0);
+    final items = _visible();
+    final dark = AppTheme.isDark(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SizedBox(
+        height: height,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                widget.title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                controller: _search,
+                textInputAction: TextInputAction.search,
+                onChanged: (value) => setState(() => _filter = value),
+                decoration: _formDecoration(
+                  context,
+                  hintText: 'Search',
+                  prefixIcon: const Icon(Icons.search),
+                ),
+              ),
+            ),
+            Expanded(
+              child: items.isEmpty
+                  ? Center(
+                      child: Text(
+                        widget.options.isEmpty
+                            ? 'No records.'
+                            : 'No matching records.',
+                        style: TextStyle(
+                          color: AppTheme.secondaryText(context),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: items.length,
+                      itemExtent: 48,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        final selected = item.code == widget.value;
+                        return ListTile(
+                          dense: true,
+                          title: Text(
+                            item.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: selected
+                                  ? (dark
+                                        ? AppColors.lime
+                                        : AppColors.forestDeep)
+                                  : AppTheme.primaryText(context),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          onTap: () => Navigator.pop(context, item.code),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 InputDecoration _formDecoration(
   BuildContext context, {
   bool emphasize = false,
@@ -1339,24 +1625,6 @@ InputDecoration _formDecoration(
     prefixIcon: prefixIcon,
     suffixIcon: suffixIcon,
     suffixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 48),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-    border: _formBorder(context),
-    enabledBorder: _formBorder(context),
-    focusedBorder: _formBorder(context, focused: true),
-    disabledBorder: _formBorder(context),
-  );
-}
-
-InputDecorationTheme _formTheme(BuildContext context) {
-  return InputDecorationTheme(
-    filled: true,
-    fillColor: _formFill(context),
-    isDense: true,
-    hintStyle: TextStyle(
-      color: AppTheme.secondaryText(context),
-      fontSize: 14,
-      fontWeight: FontWeight.w500,
-    ),
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
     border: _formBorder(context),
     enabledBorder: _formBorder(context),
@@ -1387,191 +1655,6 @@ OutlineInputBorder _formBorder(BuildContext context, {bool focused = false}) {
       width: focused ? 1.6 : 1.2,
     ),
   );
-}
-
-class _FieldDropdown extends StatefulWidget {
-  const _FieldDropdown({
-    super.key,
-    required this.label,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String? value;
-  final List<SodaOption> options;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  State<_FieldDropdown> createState() => _FieldDropdownState();
-}
-
-class _FieldDropdownState extends State<_FieldDropdown> {
-  final _controller = TextEditingController();
-  final _focus = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _showSelected();
-    _focus.addListener(_onFocus);
-  }
-
-  @override
-  void didUpdateWidget(covariant _FieldDropdown oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_focus.hasFocus) return;
-    if (oldWidget.value != widget.value ||
-        oldWidget.options != widget.options) {
-      _showSelected();
-    }
-  }
-
-  @override
-  void dispose() {
-    _focus.removeListener(_onFocus);
-    _focus.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _onFocus() {
-    if (_focus.hasFocus) {
-      _controller.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: _controller.text.length,
-      );
-      return;
-    }
-    _showSelected();
-  }
-
-  void _showSelected() {
-    final label = _find(widget.options, widget.value)?.name ?? '';
-    if (_controller.text == label) return;
-    _controller.value = TextEditingValue(
-      text: label,
-      selection: TextSelection.collapsed(offset: label.length),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = AppTheme.isDark(context) ? AppColors.lime : AppColors.forest;
-    final availableHeight = MediaQuery.sizeOf(context).height * 0.45;
-    final menuHeight = availableHeight < 320 ? availableHeight : 320.0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          widget.label,
-          style: TextStyle(
-            color: AppTheme.secondaryText(context),
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            height: 1.2,
-          ),
-        ),
-        const SizedBox(height: 6),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            return DropdownMenu<String>(
-              controller: _controller,
-              focusNode: _focus,
-              requestFocusOnTap: true,
-              enableFilter: true,
-              enableSearch: true,
-              expandedInsets: EdgeInsets.zero,
-              width: width.isFinite ? width : null,
-              initialSelection: widget.value,
-              hintText: 'Select',
-              menuHeight: menuHeight,
-              alignmentOffset: const Offset(0, 6),
-              textStyle: TextStyle(
-                color: AppTheme.primaryText(context),
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                height: 1.2,
-              ),
-              inputDecorationTheme: _formTheme(context),
-              menuStyle: MenuStyle(
-                backgroundColor: WidgetStatePropertyAll(
-                  AppTheme.cardColor(context),
-                ),
-                surfaceTintColor: const WidgetStatePropertyAll(
-                  Colors.transparent,
-                ),
-                elevation: const WidgetStatePropertyAll(8),
-                shape: WidgetStatePropertyAll(
-                  RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: BorderSide(color: _formBorderColor(context)),
-                  ),
-                ),
-              ),
-              trailingIcon: Icon(
-                Icons.keyboard_arrow_down_rounded,
-                color: AppTheme.secondaryText(context),
-              ),
-              selectedTrailingIcon: Icon(
-                Icons.keyboard_arrow_up_rounded,
-                color: accent,
-              ),
-              filterCallback: (entries, filter) {
-                final query = filter.trim().toLowerCase();
-                if (query.isEmpty) return entries;
-                return [
-                  for (final entry in entries)
-                    if (entry.label.toLowerCase().contains(query) ||
-                        entry.value.toLowerCase().contains(query))
-                      entry,
-                ];
-              },
-              dropdownMenuEntries: [
-                for (final item in widget.options)
-                  DropdownMenuEntry<String>(
-                    value: item.code,
-                    label: item.name,
-                    labelWidget: Text(
-                      item.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: item.code == widget.value
-                            ? accent
-                            : AppTheme.primaryText(context),
-                        fontSize: 14,
-                        fontWeight: item.code == widget.value
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        height: 1.25,
-                      ),
-                    ),
-                    trailingIcon: item.code == widget.value
-                        ? Icon(Icons.check, color: accent, size: 18)
-                        : null,
-                  ),
-              ],
-              onSelected: (value) {
-                if (value == null) {
-                  _showSelected();
-                  return;
-                }
-                widget.onChanged(value);
-                final label = _find(widget.options, value)?.name ?? value;
-                _controller.value = TextEditingValue(
-                  text: label,
-                  selection: TextSelection.collapsed(offset: label.length),
-                );
-              },
-            );
-          },
-        ),
-      ],
-    );
-  }
 }
 
 class _VoucherSheet extends StatefulWidget {
@@ -1778,19 +1861,35 @@ List<SodaOption> _sbfTypeOptions(List<SodaOption> items) {
       SodaOption(code: code, name: _sbfTypeName(code, item.name), raw: item.raw),
     );
   }
+  for (final item in const [
+    SodaOption(code: 'LOC', name: 'Local'),
+    SodaOption(code: 'IMP', name: 'Import'),
+    SodaOption(code: 'EXP', name: 'Export'),
+  ]) {
+    if (seen.add(item.code)) options.add(item);
+  }
   return options;
 }
 
-/// First two characters of the Movement label/code (e.g. Sale → SA).
 String? _movementCode(String? value, {String? name}) {
-  for (final candidate in [name, value]) {
+  for (final candidate in [value, name]) {
     if (candidate == null) continue;
     final text = candidate.trim().toUpperCase();
     if (text.isEmpty) continue;
-    return text.length <= 2 ? text : text.substring(0, 2);
+    if (text == 'P' ||
+        text == 'PU' ||
+        text == 'PURCHASE' ||
+        text.startsWith('PURCH')) {
+      return 'P';
+    }
+    if (text == 'S' || text == 'SA' || text == 'SALE' || text.startsWith('SALE')) {
+      return 'S';
+    }
   }
   return null;
 }
+
+String _movementName(String code) => code == 'S' ? 'Sale' : 'Purchase';
 
 List<SodaOption> _movementOptions(List<SodaOption> items) {
   final options = <SodaOption>[];
@@ -1798,38 +1897,93 @@ List<SodaOption> _movementOptions(List<SodaOption> items) {
   for (final item in items) {
     final code = _movementCode(item.code, name: item.name);
     if (code == null || !seen.add(code)) continue;
-    final label = item.name.trim().isEmpty ? item.code : item.name.trim();
-    options.add(SodaOption(code: code, name: label, raw: item.raw));
+    options.add(
+      SodaOption(code: code, name: _movementName(code), raw: item.raw),
+    );
+  }
+  for (final item in const [
+    SodaOption(code: 'P', name: 'Purchase'),
+    SodaOption(code: 'S', name: 'Sale'),
+  ]) {
+    if (seen.add(item.code)) options.add(item);
   }
   return options;
 }
 
-List<SodaOption> _withSelected(List<SodaOption> items, String? value) {
-  if (value == null ||
-      value.isEmpty ||
-      items.any((item) => item.code == value)) {
-    return items;
+const _masterFields = [
+  'traN_ID',
+  'v_DATE',
+  'voucheR_NO',
+  'selleR_CODE',
+  'sacT_CODE',
+  'buyeR_CODE',
+  'bacT_CODE',
+  'ref',
+  'remarks',
+  'cond',
+  'brokeR_CODE',
+  'coB_CODE',
+  'bD_ACT_CODE',
+  'coB_ACODE',
+  'bcode',
+  'perioD_ID',
+  'astatus',
+  'menU_ID',
+  'dlt',
+  'crediT_DAYS',
+  'duE_DATE',
+  'sbF_TYPE',
+  'curR_CODE',
+  'unit',
+  'crate',
+  'shiP_DATE',
+  'shiP_STATUS',
+  'p_S',
+  'p_SHIP',
+  'tranS_PS',
+  'sodA_TYPE',
+];
+
+const _detailFields = [
+  'traN_ID',
+  'dT_CODE',
+  'iteM_CODE',
+  'qty',
+  'unit',
+  'qtY2',
+  'baL_QTY',
+  'rate',
+  'amt',
+  'dT_DESC',
+  'duE_DATE',
+  'bcode',
+  'perioD_ID',
+  'chk',
+  'rT_TYPE',
+];
+
+Map<String, dynamic> _allowedMap(
+  Map<String, dynamic> source,
+  List<String> names,
+) {
+  final result = <String, dynamic>{};
+  for (final name in names) {
+    final value = sodaFieldLoose(source, name);
+    if (value == null) continue;
+    result[name] = value;
   }
-  return [SodaOption(code: value, name: value), ...items];
+  return result;
 }
 
 SodaOption? _find(List<SodaOption> items, String? code) {
   if (code == null || code.isEmpty) return null;
   for (final item in items) {
     if (item.code == code) return item;
+    final customized = sodaCode(sodaFieldLoose(item.raw, 'customizedKey')) ??
+        sodaCode(sodaFieldLoose(item.raw, 'customKey'));
+    if (customized == code) return item;
   }
   return null;
-}
-
-bool _lineIsEmpty(_DetailLine line) {
-  return (line.itemCode == null || line.itemCode!.isEmpty) &&
-      line.desc.text.trim().isEmpty &&
-      line.qty.text.trim().isEmpty &&
-      line.qty2.text.trim().isEmpty &&
-      line.rate.text.trim().isEmpty &&
-      (line.rtType == null || line.rtType!.isEmpty) &&
-      line.dueDate == null &&
-      !line.checked;
 }
 
 int? _idFromSave(dynamic data) {
@@ -1886,9 +2040,22 @@ String? _dateToApi(DateTime? date) {
 }
 
 String _dateLabel(DateTime date) {
-  final month = date.month.toString().padLeft(2, '0');
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   final day = date.day.toString().padLeft(2, '0');
-  return '${date.year}-$month-$day';
+  return '$day-${months[date.month - 1]}-${date.year}';
 }
 
 int? _tranId(Map<String, dynamic> row) {
