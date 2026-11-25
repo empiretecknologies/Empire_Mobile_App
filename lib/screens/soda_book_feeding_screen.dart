@@ -153,6 +153,8 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     final id = await showModalBottomSheet<int>(
       context: _theme,
       isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
       builder: (context) => _VoucherSheet(
         service: _service,
         parties: _parties,
@@ -419,20 +421,8 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     if (id == null || _saving) return;
     final confirmed = await showDialog<bool>(
       context: _theme,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete voucher'),
-        content: const Text('Delete this Soda Book Feeding voucher?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (context) => const _DeleteConfirmDialog(),
     );
     if (confirmed != true || !mounted) return;
     setState(() => _saving = true);
@@ -531,12 +521,9 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
               ),
               actions: [
-                IconButton(
-                  tooltip: 'Vouchers',
-                  onPressed: () {
-                    _openVouchers();
-                  },
-                  icon: const Icon(Icons.folder_open_outlined),
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: _quickSearchButton(context),
                 ),
               ],
             ),
@@ -816,14 +803,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                     ),
                   ],
                 ),
-                IconButton(
+                _deleteIconButton(
+                  context,
                   tooltip: 'Remove item',
-                  visualDensity: VisualDensity.compact,
+                  compact: true,
                   onPressed: busy ? null : () => _removeLine(index),
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: Colors.red.shade400,
-                  ),
                 ),
               ],
             ),
@@ -1301,16 +1285,16 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
             child: Row(
               children: [
                 if (_tranId != null) ...[
-                  IconButton(
-                    tooltip: 'Delete',
+                  _deleteIconButton(
+                    context,
+                    tooltip: 'Delete voucher',
                     onPressed: busy
                         ? null
                         : () {
                             _delete();
                           },
-                    icon: Icon(Icons.delete_outline, color: Colors.red.shade400),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 10),
                 ],
                 Expanded(
                   child: AppButton(
@@ -1340,6 +1324,68 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     );
   }
 
+  Widget _quickSearchButton(BuildContext context) {
+    return Material(
+      color: AppColors.lime,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        onTap: _openVouchers,
+        borderRadius: BorderRadius.circular(22),
+        child: const Padding(
+          padding: EdgeInsets.fromLTRB(10, 7, 12, 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.search_rounded, size: 18, color: AppColors.forestDeep),
+              SizedBox(width: 6),
+              Text(
+                'Search',
+                style: TextStyle(
+                  color: AppColors.forestDeep,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _deleteIconButton(
+    BuildContext context, {
+    required String tooltip,
+    required VoidCallback? onPressed,
+    bool compact = false,
+  }) {
+    final dark = AppTheme.isDark(context);
+    final size = compact ? 36.0 : 48.0;
+    final disabled = onPressed == null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: dark ? const Color(0xFF3A1E1E) : const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(compact ? 12 : 14),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(compact ? 12 : 14),
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Icon(
+              Icons.delete_rounded,
+              size: compact ? 18 : 22,
+              color: disabled
+                  ? Colors.red.shade200
+                  : const Color(0xFFE53935),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _pair(Widget left, Widget right) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1348,6 +1394,102 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
         const SizedBox(width: 8),
         Expanded(child: right),
       ],
+    );
+  }
+}
+
+class _DeleteConfirmDialog extends StatelessWidget {
+  const _DeleteConfirmDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = AppTheme.isDark(context);
+    return Dialog(
+      backgroundColor: AppTheme.cardColor(context),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: dark ? const Color(0xFF3A1E1E) : const Color(0xFFFFEBEE),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.delete_rounded,
+                size: 30,
+                color: Color(0xFFE53935),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Delete voucher?',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.primaryText(context),
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'This Soda Book Feeding voucher will be removed. This action cannot be undone.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.secondaryText(context),
+                fontSize: 14,
+                height: 1.35,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                      foregroundColor: AppTheme.primaryText(context),
+                      side: BorderSide(color: AppTheme.dividerColor(context)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                      backgroundColor: const Color(0xFFE53935),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1749,11 +1891,37 @@ class _VoucherSheetState extends State<_VoucherSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text(
-                  'Vouchers',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.forest.withValues(
+                          alpha: AppTheme.isDark(context) ? 0.35 : 0.12,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.search_rounded,
+                        color: AppTheme.isDark(context)
+                            ? AppColors.lime
+                            : AppColors.forestDeep,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Quick Search',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Padding(
@@ -1768,8 +1936,8 @@ class _VoucherSheetState extends State<_VoucherSheet> {
                   },
                   decoration: _formDecoration(
                     context,
-                    hintText: 'Search',
-                    prefixIcon: const Icon(Icons.search),
+                    hintText: 'Search voucher no, seller...',
+                    prefixIcon: const Icon(Icons.search_rounded),
                   ),
                 ),
               ),
@@ -1814,8 +1982,24 @@ class _VoucherSheetState extends State<_VoucherSheet> {
       children: [
         for (final row in entries)
           ListTile(
-            title: Text(_title(row)),
+            leading: CircleAvatar(
+              backgroundColor: AppColors.forest.withValues(
+                alpha: AppTheme.isDark(context) ? 0.35 : 0.12,
+              ),
+              foregroundColor: AppTheme.isDark(context)
+                  ? AppColors.lime
+                  : AppColors.forestDeep,
+              child: const Icon(Icons.receipt_long_outlined, size: 20),
+            ),
+            title: Text(
+              _title(row),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
             subtitle: Text(_subtitle(row, widget.parties)),
+            trailing: Icon(
+              Icons.chevron_right_rounded,
+              color: AppTheme.secondaryText(context),
+            ),
             onTap: () => Navigator.pop(context, _tranId(row)),
           ),
       ],

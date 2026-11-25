@@ -23,13 +23,18 @@ const _durations = <({String key, String label})>[
 ];
 
 const _donutColors = <Color>[
-  Color(0xFF0E6B38),
-  Color(0xFF157A40),
-  Color(0xFF2E7D32),
+  AppColors.forestDeep,
+  AppColors.forest,
+  AppColors.forestMid,
+  Color(0xFF1B8A4A),
+  Color(0xFF2E9A55),
   Color(0xFF43A047),
   Color(0xFF66BB6A),
-  Color(0xFF81C784),
-  Color(0xFFA5D6A7),
+  AppColors.limeSoft,
+  AppColors.lime,
+  Color(0xFF7CB342),
+  Color(0xFF558B2F),
+  Color(0xFFC5E1A5),
 ];
 
 class DashboardScreen extends StatefulWidget {
@@ -1200,22 +1205,27 @@ class _ChartCard extends StatelessWidget {
       title: title,
       actionLabel: showAction ? 'View Details  →' : '',
       onAction: onDetails,
-      child: SizedBox(
-        height: expanded
-            ? 280
-            : kind == _ChartKind.donut
-            ? 230
-            : 210,
-        child: slot.loading && series == null
-            ? const _SectionLoader(label: 'Loading chart...')
-            : slot.error != null && (series == null || series.points.isEmpty)
-            ? _SectionMessage(message: slot.error!, onRetry: onRetry)
-            : series == null || series.points.isEmpty
-            ? const _EmptyHint(label: 'No data for this period')
-            : kind == _ChartKind.donut
-            ? _DonutChartView(series: series)
-            : _XyChartView(series: series, kind: kind),
-      ),
+      child: slot.loading && series == null
+          ? const SizedBox(
+              height: 210,
+              child: _SectionLoader(label: 'Loading chart...'),
+            )
+          : slot.error != null && (series == null || series.points.isEmpty)
+          ? SizedBox(
+              height: 210,
+              child: _SectionMessage(message: slot.error!, onRetry: onRetry),
+            )
+          : series == null || series.points.isEmpty
+          ? const SizedBox(
+              height: 210,
+              child: _EmptyHint(label: 'No data for this period'),
+            )
+          : kind == _ChartKind.donut
+          ? _DonutChartView(series: series, expanded: expanded)
+          : SizedBox(
+              height: expanded ? 280 : 210,
+              child: _XyChartView(series: series, kind: kind),
+            ),
     );
   }
 }
@@ -1305,14 +1315,17 @@ class _DashboardPanel extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
+            padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Icon(icon, color: AppColors.forest, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: AppTheme.primaryText(context),
                       fontSize: 14,
@@ -1325,6 +1338,7 @@ class _DashboardPanel extends StatelessWidget {
                     onPressed: onAction,
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
                     child: Text(actionLabel),
                   ),
@@ -1458,36 +1472,18 @@ class _GridRecordTile extends StatelessWidget {
     if (name.isEmpty && outstanding.isEmpty) {
       return _generic(context);
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                name.isEmpty ? '-' : name,
-                style: TextStyle(
-                  color: AppTheme.primaryText(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            if (status.isNotEmpty) _StatusBadge(label: status),
-          ],
-        ),
-        const SizedBox(height: 6),
-        _meta(context, 'Outstanding', outstanding),
+    return _recordLayout(
+      context,
+      title: name.isEmpty ? '-' : name,
+      status: status,
+      lines: [
+        if (outstanding.isNotEmpty) ('Outstanding', outstanding),
         if (lastDate.isNotEmpty || lastAmount.isNotEmpty)
-          _meta(
-            context,
+          (
             'Last received',
-            [
-              lastDate,
-              lastAmount,
-            ].where((part) => part.isNotEmpty).join('  ·  '),
+            [lastDate, lastAmount].where((part) => part.isNotEmpty).join(' · '),
           ),
-        if (due.isNotEmpty) _meta(context, 'Due date', due),
+        if (due.isNotEmpty) ('Due date', due),
       ],
     );
   }
@@ -1510,47 +1506,15 @@ class _GridRecordTile extends StatelessWidget {
     final qty = grid.cell(record, const ['qty (kg)', 'qty', 'quantity']);
     final status = grid.cell(record, const ['status']);
     if (order.isEmpty && buyer.isEmpty) return _generic(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                order.isEmpty ? '-' : order,
-                style: TextStyle(
-                  color: AppTheme.primaryText(context),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            if (status.isNotEmpty) _StatusBadge(label: status),
-          ],
-        ),
-        if (buyer.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            buyer,
-            style: TextStyle(
-              color: AppTheme.primaryText(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-        const SizedBox(height: 4),
-        Text(
-          [
-            date,
-            if (qty.isNotEmpty) '$qty kg',
-          ].where((part) => part.isNotEmpty).join('  ·  '),
-          style: TextStyle(
-            color: AppTheme.secondaryText(context),
-            fontSize: 12,
-          ),
-        ),
-      ],
+    return _recordLayout(
+      context,
+      title: order.isEmpty ? '-' : order,
+      status: status,
+      subtitle: buyer,
+      footer: [
+        date,
+        if (qty.isNotEmpty) '$qty kg',
+      ].where((part) => part.isNotEmpty).join(' · '),
     );
   }
 
@@ -1575,40 +1539,91 @@ class _GridRecordTile extends StatelessWidget {
     if (order.isEmpty && buyer.isEmpty && product.isEmpty) {
       return _generic(context);
     }
-    return Column(
+    return _recordLayout(
+      context,
+      title: order.isEmpty ? '-' : order,
+      subtitle: [
+        buyer,
+        if (seller.isNotEmpty) seller,
+      ].where((part) => part.isNotEmpty).join(' → '),
+      footer: [
+        date,
+        if (qty.isNotEmpty) '$qty kg',
+        product,
+      ].where((part) => part.isNotEmpty).join(' · '),
+    );
+  }
+
+  Widget _recordLayout(
+    BuildContext context, {
+    required String title,
+    String status = '',
+    String subtitle = '',
+    String footer = '',
+    List<(String, String)> lines = const [],
+  }) {
+    final titleStyle = TextStyle(
+      color: AppTheme.primaryText(context),
+      fontSize: 13,
+      fontWeight: FontWeight.w700,
+      height: 1.25,
+    );
+    final subtitleStyle = TextStyle(
+      color: AppTheme.primaryText(context),
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      height: 1.3,
+    );
+    final footerStyle = TextStyle(
+      color: AppTheme.secondaryText(context),
+      fontSize: 12,
+      height: 1.3,
+    );
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          order.isEmpty ? '-' : order,
-          style: TextStyle(
-            color: AppTheme.primaryText(context),
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.left,
+                style: titleStyle,
+              ),
+              if (subtitle.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left,
+                  style: subtitleStyle,
+                ),
+              ],
+              if (footer.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  footer,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.left,
+                  style: footerStyle,
+                ),
+              ],
+              for (final line in lines) ...[
+                const SizedBox(height: 4),
+                _meta(context, line.$1, line.$2),
+              ],
+            ],
           ),
         ),
-        if (buyer.isNotEmpty || seller.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(
-            [buyer, if (seller.isNotEmpty) seller].join('  →  '),
-            style: TextStyle(
-              color: AppTheme.primaryText(context),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+        if (status.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          _StatusBadge(label: status),
         ],
-        const SizedBox(height: 4),
-        Text(
-          [
-            date,
-            if (qty.isNotEmpty) '$qty kg',
-            product,
-          ].where((part) => part.isNotEmpty).join('  ·  '),
-          style: TextStyle(
-            color: AppTheme.secondaryText(context),
-            fontSize: 12,
-          ),
-        ),
       ],
     );
   }
@@ -1634,33 +1649,37 @@ class _GridRecordTile extends StatelessWidget {
 
   Widget _meta(BuildContext context, String label, String value) {
     if (value.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 108,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: AppTheme.secondaryText(context),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 104,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              color: AppTheme.secondaryText(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: AppTheme.primaryText(context),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              color: AppTheme.primaryText(context),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1685,19 +1704,25 @@ class _StatusBadge extends StatelessWidget {
     } else if (key.contains('complete') || key == 'clear' || key == 'current') {
       color = const Color(0xFF2E7D32);
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label.toUpperCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 118),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: color,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+          ),
         ),
       ),
     );
@@ -1713,7 +1738,7 @@ class _XyChartView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       child: CustomPaint(
         painter: _XyChartPainter(
           points: series.points,
@@ -1728,9 +1753,10 @@ class _XyChartView extends StatelessWidget {
 }
 
 class _DonutChartView extends StatelessWidget {
-  const _DonutChartView({required this.series});
+  const _DonutChartView({required this.series, this.expanded = false});
 
   final DashboardChartSeries series;
+  final bool expanded;
 
   @override
   Widget build(BuildContext context) {
@@ -1738,21 +1764,27 @@ class _DonutChartView extends StatelessWidget {
     final total =
         series.total ??
         points.fold<num>(0, (sum, point) => sum + point.sliceValue.abs());
+    final ringSize = expanded ? 196.0 : 168.0;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+      child: Column(
         children: [
-          Expanded(
-            flex: 5,
-            child: Stack(
+          SizedBox(
+            height: ringSize,
+            width: double.infinity,
+            child: Center(
+              child: SizedBox(
+                width: ringSize,
+                height: ringSize,
+                child: Stack(
               alignment: Alignment.center,
               children: [
                 CustomPaint(
                   painter: _DonutPainter(points: points),
-                  child: const SizedBox.expand(),
+                  size: Size(ringSize, ringSize),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
+                SizedBox(
+                  width: ringSize * 0.58,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1763,15 +1795,17 @@ class _DonutChartView extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.forest,
-                          fontSize: 13,
+                          fontSize: 14,
                           fontWeight: FontWeight.w800,
+                          height: 1.2,
                         ),
                       ),
                       Text(
                         'Total Sales',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AppTheme.secondaryText(context),
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1779,54 +1813,54 @@ class _DonutChartView extends StatelessWidget {
                   ),
                 ),
               ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 6,
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                for (var i = 0; i < points.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 9,
-                          height: 9,
-                          decoration: BoxDecoration(
-                            color: _pointColor(points[i], i),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            points[i].label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppTheme.primaryText(context),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${_percent(points[i], points).round()}%',
-                          style: TextStyle(
-                            color: AppTheme.secondaryText(context),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
+          const SizedBox(height: 12),
+          for (var i = 0; i < points.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: _pointColor(i),
+                      shape: BoxShape.circle,
                     ),
                   ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      points[i].label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.left,
+                      style: TextStyle(
+                        color: AppTheme.primaryText(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '${_percent(points[i], points).round()}%',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: AppTheme.secondaryText(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -2048,10 +2082,10 @@ class _XyChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (points.isEmpty) return;
-    const left = 42.0;
-    const bottom = 28.0;
+    const left = 48.0;
+    const bottom = 30.0;
     const top = 12.0;
-    const right = 8.0;
+    const right = 10.0;
     final chart = Rect.fromLTWH(
       left,
       top,
@@ -2074,8 +2108,9 @@ class _XyChartPainter extends CustomPainter {
       final label = formatCompactAxis(ceiling * (i / 4));
       final painter = TextPainter(
         text: TextSpan(text: label, style: textStyle),
+        textAlign: TextAlign.right,
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: left - 4);
+      )..layout(maxWidth: left - 8);
       painter.paint(
         canvas,
         Offset(left - painter.width - 6, y - painter.height / 2),
@@ -2083,7 +2118,8 @@ class _XyChartPainter extends CustomPainter {
     }
 
     final n = points.length;
-    final barWidth = chart.width / math.max(n * 1.6, 1);
+    final slotWidth = chart.width / math.max(n, 1);
+    final barWidth = math.min(slotWidth * 0.62, 28.0);
     final barPaint = Paint()..color = AppColors.forest;
     final linePaint = Paint()
       ..color = kind == _ChartKind.area ? AppColors.forest : AppColors.limeSoft
@@ -2096,16 +2132,12 @@ class _XyChartPainter extends CustomPainter {
     final path = Path();
     Offset? first;
     Offset? last;
+    final labelStep = n <= 5 ? 1 : (n / 4).ceil();
 
     for (var i = 0; i < n; i++) {
-      final x = n == 1
-          ? chart.left + chart.width / 2
-          : chart.left + chart.width * (i / (n - 1));
-      final barX = n == 1
-          ? chart.left + (chart.width - barWidth) / 2
-          : chart.left +
-                (chart.width / n) * i +
-                (chart.width / n - barWidth) / 2;
+      final slotLeft = chart.left + slotWidth * i;
+      final centerX = slotLeft + slotWidth / 2;
+      final barX = centerX - barWidth / 2;
       final y =
           chart.bottom - chart.height * (points[i].value.toDouble() / ceiling);
       if (kind == _ChartKind.bars) {
@@ -2119,10 +2151,7 @@ class _XyChartPainter extends CustomPainter {
       }
       final trendValue = (points[i].trend ?? points[i].value).toDouble();
       final ty = chart.bottom - chart.height * (trendValue / ceiling);
-      final point = Offset(
-        kind == _ChartKind.bars ? barX + barWidth / 2 : x,
-        ty,
-      );
+      final point = Offset(centerX, ty);
       if (first == null) {
         path.moveTo(point.dx, point.dy);
         first = point;
@@ -2131,20 +2160,21 @@ class _XyChartPainter extends CustomPainter {
       }
       last = point;
 
+      final showLabel = i == 0 || i == n - 1 || i % labelStep == 0;
+      if (!showLabel) continue;
       final labelPainter = TextPainter(
         text: TextSpan(text: points[i].label, style: textStyle),
+        textAlign: TextAlign.center,
         textDirection: TextDirection.ltr,
         maxLines: 1,
         ellipsis: '…',
-      )..layout(maxWidth: math.max(chart.width / n - 2, 28));
-      labelPainter.paint(
-        canvas,
-        Offset(
-          (kind == _ChartKind.bars ? barX + barWidth / 2 : x) -
-              labelPainter.width / 2,
-          chart.bottom + 6,
-        ),
-      );
+      )..layout(maxWidth: math.max(slotWidth * labelStep - 4, 36));
+      var labelX = centerX - labelPainter.width / 2;
+      if (labelX < chart.left) labelX = chart.left;
+      if (labelX + labelPainter.width > chart.right) {
+        labelX = chart.right - labelPainter.width;
+      }
+      labelPainter.paint(canvas, Offset(labelX, chart.bottom + 6));
     }
 
     if (kind == _ChartKind.area && first != null && last != null) {
@@ -2158,21 +2188,10 @@ class _XyChartPainter extends CustomPainter {
       canvas.drawPath(path, linePaint);
       final dot = Paint()..color = linePaint.color;
       for (var i = 0; i < n; i++) {
-        final x = n == 1
-            ? chart.left + chart.width / 2
-            : chart.left + chart.width * (i / (n - 1));
-        final barX = n == 1
-            ? chart.left + (chart.width - barWidth) / 2
-            : chart.left +
-                  (chart.width / n) * i +
-                  (chart.width / n - barWidth) / 2;
+        final centerX = chart.left + slotWidth * i + slotWidth / 2;
         final trendValue = (points[i].trend ?? points[i].value).toDouble();
         final ty = chart.bottom - chart.height * (trendValue / ceiling);
-        canvas.drawCircle(
-          Offset(kind == _ChartKind.bars ? barX + barWidth / 2 : x, ty),
-          3.2,
-          dot,
-        );
+        canvas.drawCircle(Offset(centerX, ty), 3.2, dot);
       }
     }
   }
@@ -2209,7 +2228,7 @@ class _DonutPainter extends CustomPainter {
         math.pi * 2,
         false,
         Paint()
-          ..color = const Color(0xFFE0E0E0)
+          ..color = const Color(0xFFD7E3D7)
           ..style = PaintingStyle.stroke
           ..strokeWidth = side * 0.18,
       );
@@ -2223,7 +2242,7 @@ class _DonutPainter extends CustomPainter {
         sweep,
         false,
         Paint()
-          ..color = _pointColor(points[i], i)
+          ..color = _pointColor(i)
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.butt
           ..strokeWidth = side * 0.18,
@@ -2238,20 +2257,8 @@ class _DonutPainter extends CustomPainter {
   }
 }
 
-Color _pointColor(DashboardChartPoint point, int index) {
-  final parsed = _parseColor(point.color);
-  if (parsed != null) return parsed;
+Color _pointColor(int index) {
   return _donutColors[index % _donutColors.length];
-}
-
-Color? _parseColor(String? raw) {
-  if (raw == null || raw.trim().isEmpty) return null;
-  var hex = raw.trim().replaceAll('#', '').replaceAll('0x', '');
-  if (hex.length == 6) hex = 'FF$hex';
-  if (hex.length != 8) return null;
-  final value = int.tryParse(hex, radix: 16);
-  if (value == null) return null;
-  return Color(value);
 }
 
 num _percent(DashboardChartPoint point, List<DashboardChartPoint> points) {
