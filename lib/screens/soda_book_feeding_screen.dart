@@ -62,6 +62,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
   bool _saving = false;
   bool _leaving = false;
   int _loadToken = 0;
+  Set<String> _invalidFields = {};
   BuildContext? _themeContext;
   final _formScroll = ScrollController();
   final _itemsScroll = ScrollController();
@@ -303,23 +304,62 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       }
       return;
     }
-    final text = _numberText(qty * rate);
+    final unitQty = _unitQty(line.unitCode ?? _unit);
+    final rtType = _rtTypeQty(line.rtType);
+    final value1 = qty * unitQty;
+    final text = _numberText(value1 * (rate * rtType));
     if (line.amount.text != text) {
       line.amount.text = text;
       setState(() {});
     }
   }
 
+  num _unitQty(String? unitCode) {
+    final option = _find(_units, unitCode);
+    if (option == null) return 1;
+    return _rawNum(option.raw, const [
+          'qty',
+          'qTY',
+          'unitQty',
+          'unIT_QTY',
+          'uNIT_QTY',
+          'conV_QTY',
+          'factor',
+        ]) ??
+        1;
+  }
+
+  num _rtTypeQty(String? rtType) {
+    if (rtType == null || rtType.trim().isEmpty) return 1;
+    final option = _find(_rtTypes, rtType);
+    if (option != null) {
+      final fromRaw = _rawNum(option.raw, const [
+        'qty',
+        'qTY',
+        'rtType',
+        'rT_TYPE',
+        'factor',
+        'value',
+      ]);
+      if (fromRaw != null) return fromRaw;
+      final fromCode = num.tryParse(option.code.trim());
+      if (fromCode != null) return fromCode;
+      final fromName = _leadingNum(option.name);
+      if (fromName != null) return fromName;
+    }
+    return _readNum(rtType) ?? _leadingNum(rtType) ?? 1;
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (_voucherDate == null) {
-      _message('Voucher date is required.');
+      _message('Voucher date is required.', fields: {'voucherDate'});
       return;
     }
     final master = _masterPayload();
     final detail = _detailPayload();
     if (detail.isEmpty) {
-      _message('Add at least one item before saving.');
+      _message('Add at least one item before saving.', fields: {'item'});
       return;
     }
     debugPrint(
@@ -353,7 +393,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       } else if (mounted) {
         setState(() => _saving = false);
       }
-      _message('Voucher saved.');
+      _message('Voucher saved.', fields: {});
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -453,11 +493,89 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     );
   }
 
-  void _message(String text) {
+  void _message(String text, {Set<String>? fields}) {
     if (!mounted) return;
+    setState(() {
+      _invalidFields = fields ?? _fieldsFromMessage(text);
+    });
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  void _clearError(String field) {
+    if (!_invalidFields.contains(field)) return;
+    setState(() {
+      _invalidFields = {..._invalidFields}..remove(field);
+    });
+  }
+
+  bool _isInvalid(String field, [_DetailLine? line]) {
+    if (!_invalidFields.contains(field)) return false;
+    if (line == null) return true;
+    bool missing(_DetailLine row) {
+      switch (field) {
+        case 'item':
+          return row.itemCode == null || row.itemCode!.isEmpty;
+        case 'qty':
+          return _readNum(row.qty.text) == null;
+        case 'rate':
+          return _readNum(row.rate.text) == null;
+        case 'unit':
+          return (row.unitCode ?? '').isEmpty;
+        case 'rtType':
+          return (row.rtType ?? '').isEmpty;
+        default:
+          return false;
+      }
+    }
+
+    final missingLines = _lines.where(missing).toList();
+    if (missingLines.isEmpty) return identical(line, _lines.first);
+    return missingLines.contains(line);
+  }
+
+  Set<String> _fieldsFromMessage(String text) {
+    final lower = text.toLowerCase();
+    final result = <String>{};
+    const rules = <(List<String>, String)>[
+      (['rt type', 'rttype', 'rate type'], 'rtType'),
+      (
+        ['credit day', 'cr. day', 'cr day', 'credit_days', 'creditdays'],
+        'creditDays',
+      ),
+      (['due date', 'credit date', 'due_date'], 'dueDate'),
+      (
+        ['transaction date', 'voucher date', 'v_date', 'v date'],
+        'voucherDate',
+      ),
+      (['seller'], 'seller'),
+      (['buyer'], 'buyer'),
+      (['broker'], 'broker'),
+      (['condition'], 'condition'),
+      (['movement'], 'movement'),
+      (['quantity', 'qty'], 'qty'),
+      (['item', 'product'], 'item'),
+      (['rate'], 'rate'),
+      (['unit'], 'unit'),
+      (['comment', 'remarks'], 'remarks'),
+      (['type'], 'type'),
+    ];
+    for (final rule in rules) {
+      if (rule.$2 == 'type' && result.contains('rtType')) {
+        final rest = lower
+            .replaceAll('rt type', ' ')
+            .replaceAll('rttype', ' ')
+            .replaceAll('rate type', ' ');
+        if (!rest.contains('type')) continue;
+      }
+      if (rule.$1.any(lower.contains)) result.add(rule.$2);
+    }
+    if (lower.contains('at least one item') ||
+        lower.contains('add at least one')) {
+      result.add('item');
+    }
+    return result;
   }
 
   void _onSeller(String? code) {
@@ -470,6 +588,35 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     setState(() => _buyer = code);
     final act = sodaActCode(_find(_parties, code)?.raw ?? const {});
     if (act != null) sodaSetField(_master, 'bacT_CODE', act);
+  }
+
+  void _onBroker(String? code) {
+    setState(() => _broker = code);
+  }
+
+  void _onCondition(String? code) {
+    setState(() {
+      _condition = code;
+      if (!_showsCreditFields(code)) {
+        _creditDays.clear();
+        _dueDate = null;
+      } else {
+        _applyCreditDueDate();
+      }
+    });
+  }
+
+  bool _showsCreditFields([String? condition]) {
+    final code = condition ?? _condition;
+    final option = _find(_conditions, code);
+    final text = [
+      option?.name,
+      option?.code,
+      code,
+    ].whereType<String>().join(' ').toLowerCase().replaceAll('_', ' ');
+    return text.contains('credit day') ||
+        text.contains('credit date') ||
+        text.contains('advance day');
   }
 
   void _onItem(_DetailLine line, String? code) {
@@ -625,10 +772,14 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                     value: _voucherDate,
                     enabled: !busy,
                     compact: true,
-                    onPick: (value) => setState(() {
-                      _voucherDate = value;
-                      _applyCreditDueDate();
-                    }),
+                    error: _isInvalid('voucherDate'),
+                    onPick: (value) {
+                      _clearError('voucherDate');
+                      setState(() {
+                        _voucherDate = value;
+                        _applyCreditDueDate();
+                      });
+                    },
                   ),
                   _lookupTile(
                     context,
@@ -638,9 +789,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                     icon: Icons.swap_horiz_rounded,
                     enabled: !busy,
                     compact: true,
-                    onChanged: (value) => setState(
-                      () => _movement = _movementCode(value),
-                    ),
+                    error: _isInvalid('movement'),
+                    onChanged: (value) {
+                      _clearError('movement');
+                      setState(() => _movement = _movementCode(value));
+                    },
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -652,7 +805,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                   icon: Icons.person_outline_rounded,
                   hint: 'Select Seller',
                   enabled: !busy,
-                  onChanged: _onSeller,
+                  error: _isInvalid('seller'),
+                  onChanged: (value) {
+                    _clearError('seller');
+                    _onSeller(value);
+                  },
                 ),
                 const SizedBox(height: 8),
                 _lookupTile(
@@ -663,8 +820,72 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                   icon: Icons.storefront_outlined,
                   hint: 'Select Buyer',
                   enabled: !busy,
-                  onChanged: _onBuyer,
+                  error: _isInvalid('buyer'),
+                  onChanged: (value) {
+                    _clearError('buyer');
+                    _onBuyer(value);
+                  },
                 ),
+                const SizedBox(height: 8),
+                _lookupTile(
+                  context,
+                  label: 'Broker Code',
+                  value: _broker,
+                  options: _parties,
+                  icon: Icons.handshake_outlined,
+                  hint: 'Select Broker',
+                  enabled: !busy,
+                  error: _isInvalid('broker'),
+                  onChanged: (value) {
+                    _clearError('broker');
+                    _onBroker(value);
+                  },
+                ),
+                const SizedBox(height: 8),
+                _lookupTile(
+                  context,
+                  label: 'Condition',
+                  value: _condition,
+                  options: _conditions,
+                  icon: Icons.rule_outlined,
+                  hint: 'Select Condition',
+                  enabled: !busy,
+                  error: _isInvalid('condition'),
+                  onChanged: (value) {
+                    _clearError('condition');
+                    _onCondition(value);
+                  },
+                ),
+                if (_showsCreditFields()) ...[
+                  const SizedBox(height: 8),
+                  _pair(
+                    _numberTile(
+                      context,
+                      label: 'Credit Days',
+                      controller: _creditDays,
+                      icon: Icons.timelapse_outlined,
+                      enabled: !busy,
+                      compact: true,
+                      error: _isInvalid('creditDays'),
+                      onChanged: (_) {
+                        _clearError('creditDays');
+                        setState(_applyCreditDueDate);
+                      },
+                    ),
+                    _dateTile(
+                      context,
+                      label: 'Due Date',
+                      value: _dueDate,
+                      enabled: !busy,
+                      compact: true,
+                      error: _isInvalid('dueDate'),
+                      onPick: (value) {
+                        _clearError('dueDate');
+                        setState(() => _dueDate = value);
+                      },
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 _lookupTile(
                   context,
@@ -673,9 +894,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                   options: _types,
                   icon: Icons.category_outlined,
                   enabled: !busy,
-                  onChanged: (value) => setState(
-                    () => _type = _sbfTypeCode(value),
-                  ),
+                  error: _isInvalid('type'),
+                  onChanged: (value) {
+                    _clearError('type');
+                    setState(() => _type = _sbfTypeCode(value));
+                  },
                 ),
                 const SizedBox(height: 8),
                 _commentField(context, busy),
@@ -820,7 +1043,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
               icon: Icons.inventory_2_outlined,
               hint: 'Select Product',
               enabled: !busy,
-              onChanged: (value) => _onItem(line, value),
+              error: _isInvalid('item', line),
+              onChanged: (value) {
+                _clearError('item');
+                _onItem(line, value);
+              },
             ),
             const SizedBox(height: 8),
             _pair(
@@ -831,7 +1058,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                 icon: Icons.inventory_outlined,
                 enabled: !busy,
                 compact: true,
-                onChanged: (_) => _recalc(line),
+                error: _isInvalid('qty', line),
+                onChanged: (_) {
+                  _clearError('qty');
+                  _recalc(line);
+                },
               ),
               _numberTile(
                 context,
@@ -840,7 +1071,11 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                 icon: Icons.payments_outlined,
                 enabled: !busy,
                 compact: true,
-                onChanged: (_) => _recalc(line),
+                error: _isInvalid('rate', line),
+                onChanged: (_) {
+                  _clearError('rate');
+                  _recalc(line);
+                },
               ),
             ),
             const SizedBox(height: 8),
@@ -854,7 +1089,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                 hint: 'Select Unit',
                 enabled: !busy,
                 compact: true,
-                onChanged: (value) => setState(() => line.unitCode = value),
+                error: _isInvalid('unit', line),
+                onChanged: (value) {
+                  _clearError('unit');
+                  setState(() => line.unitCode = value);
+                  _recalc(line);
+                },
               ),
               _lookupTile(
                 context,
@@ -865,7 +1105,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                 hint: 'Select RT Type',
                 enabled: !busy,
                 compact: true,
-                onChanged: (value) => setState(() => line.rtType = value),
+                error: _isInvalid('rtType', line),
+                onChanged: (value) {
+                  _clearError('rtType');
+                  setState(() => line.rtType = value);
+                  _recalc(line);
+                },
               ),
             ),
           ],
@@ -1030,6 +1275,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
   Widget _commentField(BuildContext context, bool busy) {
     return _inputFrame(
       context,
+      error: _isInvalid('remarks'),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1061,6 +1307,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
                     _commentKey.currentContext ?? context,
                     alignment: 0.12,
                   ),
+                  onChanged: (_) => _clearError('remarks'),
                   style: TextStyle(
                     color: AppTheme.primaryText(context),
                     fontSize: 14,
@@ -1094,10 +1341,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     required ValueChanged<DateTime> onPick,
     bool enabled = true,
     bool compact = false,
+    bool error = false,
   }) {
     return _inputFrame(
       context,
       compact: compact,
+      error: error,
       onTap: enabled
           ? () async {
               final picked = await showDatePicker(
@@ -1159,6 +1408,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     String hint = 'Select',
     bool enabled = true,
     bool compact = false,
+    bool error = false,
   }) {
     return _AnchoredDropdown(
       label: label,
@@ -1168,6 +1418,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       hint: hint,
       enabled: enabled,
       compact: compact,
+      error: error,
       onChanged: onChanged,
       iconBox: _iconBox(context, icon, compact: compact),
     );
@@ -1181,10 +1432,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     ValueChanged<String>? onChanged,
     bool enabled = true,
     bool compact = false,
+    bool error = false,
   }) {
     return _inputFrame(
       context,
       compact: compact,
+      error: error,
       child: Row(
         children: [
           _iconBox(context, icon, compact: compact),
@@ -1241,6 +1494,7 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     required Widget child,
     VoidCallback? onTap,
     bool compact = false,
+    bool error = false,
   }) {
     final box = DecoratedBox(
       decoration: BoxDecoration(
@@ -1248,7 +1502,12 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
             ? const Color(0xFF1B2420)
             : AppColors.inputFill,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.dividerColor(context)),
+        border: Border.all(
+          color: error
+              ? const Color(0xFFE53935)
+              : AppTheme.dividerColor(context),
+          width: error ? 1.4 : 1,
+        ),
       ),
       child: Padding(
         padding: EdgeInsets.symmetric(
@@ -1530,6 +1789,7 @@ class _AnchoredDropdown extends StatelessWidget {
     this.hint = 'Select',
     this.enabled = true,
     this.compact = false,
+    this.error = false,
   });
 
   final String label;
@@ -1541,6 +1801,7 @@ class _AnchoredDropdown extends StatelessWidget {
   final String hint;
   final bool enabled;
   final bool compact;
+  final bool error;
 
   Future<void> _open(BuildContext context) async {
     if (!enabled) return;
@@ -1578,7 +1839,12 @@ class _AnchoredDropdown extends StatelessWidget {
                 ? const Color(0xFF1B2420)
                 : AppColors.inputFill,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.dividerColor(context)),
+            border: Border.all(
+              color: error
+                  ? const Color(0xFFE53935)
+                  : AppTheme.dividerColor(context),
+              width: error ? 1.4 : 1,
+            ),
           ),
           child: Padding(
             padding: EdgeInsets.symmetric(
@@ -2192,6 +2458,23 @@ num? _readNum(String text) {
   final trimmed = text.trim().replaceAll(',', '');
   if (trimmed.isEmpty) return null;
   return num.tryParse(trimmed);
+}
+
+num? _rawNum(Map<String, dynamic> raw, List<String> keys) {
+  for (final key in keys) {
+    final value = sodaFieldLoose(raw, key);
+    if (value == null || value is Map || value is List) continue;
+    if (value is num) return value;
+    final parsed = num.tryParse(value.toString().trim().replaceAll(',', ''));
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
+num? _leadingNum(String text) {
+  final match = RegExp(r'[\d]+(?:[.][\d]+)?').firstMatch(text.trim());
+  if (match == null) return null;
+  return num.tryParse(match.group(0)!);
 }
 
 String? _blank(String? text) {
