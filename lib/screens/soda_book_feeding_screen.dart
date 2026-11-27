@@ -352,16 +352,16 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
 
   Future<void> _save() async {
     if (_saving) return;
-    if (_voucherDate == null) {
-      _message('Voucher date is required.', fields: {'voucherDate'});
+    final requiredErrors = _requiredErrors();
+    if (requiredErrors.isNotEmpty) {
+      _message(
+        requiredErrors.first.message,
+        fields: {for (final error in requiredErrors) error.field},
+      );
       return;
     }
     final master = _masterPayload();
     final detail = _detailPayload();
-    if (detail.isEmpty) {
-      _message('Add at least one item before saving.', fields: {'item'});
-      return;
-    }
     debugPrint(
       'SodaBookFeeding ${ _tranId != null ? 'PUT' : 'POST' } '
       '${ApiConfig.sodaBookFeeding} body=${jsonEncode({'master': master, 'detail': detail})}',
@@ -535,6 +535,47 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
     return missingLines.contains(line);
   }
 
+  List<({String field, String message})> _requiredErrors() {
+    final errors = <({String field, String message})>[];
+    void requireMaster(String field, String message) {
+      if (_isBlankMaster(field)) {
+        errors.add((field: field, message: message));
+      }
+    }
+
+    requireMaster('voucherDate', 'Transaction Date is required.');
+    requireMaster('movement', 'Movement is required.');
+    requireMaster('seller', 'Seller is required.');
+    requireMaster('buyer', 'Buyer is required.');
+    requireMaster('type', 'Type is required.');
+    if (_showsCreditFields()) {
+      requireMaster('creditDays', 'Credit Days is required.');
+      requireMaster('dueDate', 'Due Date is required.');
+    }
+    if (!_lines.any(
+      (line) => line.itemCode != null && line.itemCode!.isNotEmpty,
+    )) {
+      errors.add((
+        field: 'item',
+        message: 'Add at least one item before saving.',
+      ));
+      return errors;
+    }
+    if (!_isFilledField('qty')) {
+      errors.add((field: 'qty', message: 'Quantity is required.'));
+    }
+    if (!_isFilledField('rate')) {
+      errors.add((field: 'rate', message: 'Rate is required.'));
+    }
+    if (!_isFilledField('unit')) {
+      errors.add((field: 'unit', message: 'Unit is required.'));
+    }
+    if (!_isFilledField('rtType')) {
+      errors.add((field: 'rtType', message: 'RT Type is required.'));
+    }
+    return errors;
+  }
+
   Set<String> _fieldsFromMessage(String text) {
     final lower = text.toLowerCase();
     final result = <String>{};
@@ -553,12 +594,13 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
       (['buyer'], 'buyer'),
       (['broker'], 'broker'),
       (['condition'], 'condition'),
-      (['movement'], 'movement'),
+      (['movement', 'p_s', 'p/s', 'purchase', 'sale'], 'movement'),
       (['quantity', 'qty'], 'qty'),
       (['item', 'product'], 'item'),
       (['rate'], 'rate'),
       (['unit'], 'unit'),
       (['comment', 'remarks'], 'remarks'),
+      (['sbf type', 'soda type', 'local', 'import', 'export'], 'type'),
       (['type'], 'type'),
     ];
     for (final rule in rules) {
@@ -569,13 +611,88 @@ class _SodaBookFeedingScreenState extends State<SodaBookFeedingScreen> {
             .replaceAll('rate type', ' ');
         if (!rest.contains('type')) continue;
       }
-      if (rule.$1.any(lower.contains)) result.add(rule.$2);
+      if (!rule.$1.any(lower.contains)) continue;
+      if (rule.$2 == 'type' && rule.$1.contains('type')) {
+        if (result.contains('type') || result.contains('movement')) continue;
+        if (_isBlankMaster('movement') && !_isBlankMaster('type')) {
+          result.add('movement');
+          continue;
+        }
+      }
+      result.add(rule.$2);
     }
     if (lower.contains('at least one item') ||
         lower.contains('add at least one')) {
       result.add('item');
     }
+    result.removeWhere(_isFilledField);
     return result;
+  }
+
+  bool _isBlankMaster(String field) {
+    switch (field) {
+      case 'voucherDate':
+        return _voucherDate == null;
+      case 'movement':
+        return _movement == null || _movement!.trim().isEmpty;
+      case 'seller':
+        return _seller == null || _seller!.isEmpty;
+      case 'buyer':
+        return _buyer == null || _buyer!.isEmpty;
+      case 'broker':
+        return _broker == null || _broker!.isEmpty;
+      case 'condition':
+        return _condition == null || _condition!.isEmpty;
+      case 'creditDays':
+        return _creditDays.text.trim().isEmpty;
+      case 'dueDate':
+        return _dueDate == null;
+      case 'type':
+        return _type == null || _type!.isEmpty;
+      case 'remarks':
+        return _remarks.text.trim().isEmpty;
+      default:
+        return false;
+    }
+  }
+
+  bool _isFilledField(String field) {
+    switch (field) {
+      case 'item':
+        return _lines.any(
+          (line) => line.itemCode != null && line.itemCode!.isNotEmpty,
+        );
+      case 'qty':
+        return !_lines.any(
+          (line) =>
+              line.itemCode != null &&
+              line.itemCode!.isNotEmpty &&
+              _readNum(line.qty.text) == null,
+        );
+      case 'rate':
+        return !_lines.any(
+          (line) =>
+              line.itemCode != null &&
+              line.itemCode!.isNotEmpty &&
+              _readNum(line.rate.text) == null,
+        );
+      case 'unit':
+        return !_lines.any(
+          (line) =>
+              line.itemCode != null &&
+              line.itemCode!.isNotEmpty &&
+              (line.unitCode == null || line.unitCode!.isEmpty),
+        );
+      case 'rtType':
+        return !_lines.any(
+          (line) =>
+              line.itemCode != null &&
+              line.itemCode!.isNotEmpty &&
+              (line.rtType == null || line.rtType!.isEmpty),
+        );
+      default:
+        return !_isBlankMaster(field);
+    }
   }
 
   void _onSeller(String? code) {
